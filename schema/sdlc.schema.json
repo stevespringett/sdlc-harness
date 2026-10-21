@@ -1,0 +1,127 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Per-repo SDLC configuration (.sdlc-harness/sdlc.json)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["integration", "testCommand"],
+  "definitions": {
+    "person": {
+      "oneOf": [
+        { "type": "string", "pattern": "^[A-Za-z0-9-]+(\\[bot\\])?$", "description": "A GitHub login." },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["login"],
+          "properties": {
+            "login": { "type": "string", "pattern": "^[A-Za-z0-9-]+(\\[bot\\])?$" },
+            "id": { "type": "integer", "minimum": 1, "description": "The account's numeric id (gh api users/<login> --jq .id). When given, both must match: a login can be renamed and taken by someone else; the id cannot." }
+          }
+        }
+      ]
+    },
+    "area": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,49}$" }
+  },
+  "properties": {
+    "$schema": { "type": "string" },
+    "integration": {
+      "type": "string",
+      "enum": ["trunk", "github-flow"],
+      "description": "trunk: rebase onto the default branch and push there, no PR. github-flow: push the branch and open a PR; the autonomy label decides who merges."
+    },
+    "defaultBranch": { "type": "string", "default": "main" },
+    "testCommand": {
+      "type": "string",
+      "description": "The one command that proves the repo is green. verify.mjs runs it in HEAD's tree and records the result for that tree and that command; git's pre-push judge checks the record for the tree each push sends."
+    },
+    "protectedPaths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [],
+      "description": "Paths that make a change agent-needs-go. Entries are prefixes (\"db/\", \"server/src/auth\") or globs (\"**/package.json\"). A push touching one needs an approver's \"go\" recorded by approve.mjs. .sdlc-harness/ is always protected."
+    },
+    "e2eTriggerPaths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [],
+      "description": "Prefixes or globs. If the diff touches one, /ship runs e2eCommand after the push."
+    },
+    "e2eCommand": { "type": "string", "description": "On-demand end-to-end check, e.g. \"gh workflow run e2e.yml\". Optional." },
+    "browserVerify": { "type": "boolean", "default": false, "description": "The repo has a UI; /build verifies visible changes in a browser and attaches a screenshot to the issue." },
+    "requireGreen": { "type": "boolean", "default": true, "description": "Git's pre-push judge refuses a push whose tree sent has no green record. Set false only for repos with no tests yet." },
+    "issuePrefix": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9]{0,15}$",
+      "default": "GH",
+      "description": "Commits name the issue as <prefix>-<number>. GH is GitHub's own autolink for issues in the same repo. The judge looks for this prefix to find a recorded go."
+    },
+    "approvers": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/person" },
+      "minItems": 1,
+      "description": "The only accounts whose comments approve an issue for work, give a push go, or accept it. Never the agent account."
+    },
+    "agent": { "$ref": "#/definitions/person", "description": "The GitHub account the agent writes through (a machine user or bot). Its `## Spec` comments are the Spec; its comments never approve." },
+    "people": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/person" },
+      "default": [],
+      "description": "Other humans who file issues. A refused issue they created goes back to them; one from anyone else goes to the first approver."
+    },
+    "tracker": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repo": { "type": "string", "pattern": "^[\\w.-]+/[\\w.-]+$", "description": "owner/name of the repo whose Issues hold the work. Default: the GitHub repo origin names." },
+        "allowedOwners": { "type": "array", "items": { "type": "string" }, "description": "GitHub accounts or orgs the agent may file issues and pull requests in. Default: the tracker repo's owner." },
+        "states": { "type": "string", "enum": ["labels", "project"], "default": "labels", "description": "Where status is kept: status labels on the issue, or a single-select field on a Projects (v2) board." },
+        "statusLabels": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "notStarted": { "type": "string", "default": "status:not-started" },
+            "inProgress": { "type": "string", "default": "status:in-progress" },
+            "inReview": { "type": "string", "default": "status:in-review" }
+          }
+        },
+        "project": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["owner", "number"],
+          "properties": {
+            "owner": { "type": "string", "description": "The org or user that owns the board." },
+            "number": { "type": "integer", "minimum": 1 },
+            "field": { "type": "string", "default": "Status" },
+            "options": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "backlog": { "type": "string", "default": "Backlog" },
+                "notStarted": { "type": "string", "default": "Not Started" },
+                "inProgress": { "type": "string", "default": "In Progress" },
+                "inReview": { "type": "string", "default": "In Review" },
+                "done": { "type": "string", "default": "Done" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "area": { "$ref": "#/definitions/area", "description": "The work area whose issues this repo's watch owns (decision 0007). A watching repo with no area runs no watch." },
+    "areas": { "type": "array", "items": { "$ref": "#/definitions/area" }, "default": [], "description": "Every area in the tracker, for setup-labels.mjs." },
+    "defaultArea": { "$ref": "#/definitions/area", "description": "The area that owns an issue with no area label, a notification that is not about an issue, and an issue with several areas when it is among them." },
+    "areaLabelPrefix": { "type": "string", "default": "area:" },
+    "inFlightLimit": { "type": "integer", "minimum": 1, "default": 5, "description": "Builds in flight at once, counted per area." },
+    "checkouts": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "default": {},
+      "description": "owner/name of another repo → its checkout's path, relative to this repo's root, for issues this area owns whose change lands there."
+    },
+    "watch": { "type": "boolean", "default": true, "description": "An interactive session in this repo claims the watch lock and runs the GitHub watch. Set false for a repo that should never watch, such as the handbook." },
+    "watchInterval": { "type": "string", "pattern": "^\\d+[mh]$", "default": "15m" },
+    "policyStart": { "type": "string", "format": "date-time", "description": "Intake checks 2 and 3 apply to issues created on or after this date. Default: every issue." },
+    "modelLine": { "type": "boolean", "default": true, "description": "Every body the agent writes to GitHub ends with a line naming the model and version that wrote it." },
+    "subagentModel": { "type": "string", "default": "opus", "description": "The model every sub-agent runs with." },
+    "adhdStyle": { "type": "boolean", "default": false, "description": "Issue and PR text uses the ADHD style: answer first, numbered steps, short lists and lines." }
+  }
+}

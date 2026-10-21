@@ -1,0 +1,32 @@
+{
+  "$schema": "./sdlc.schema.json",
+  "integration": "trunk",
+  "defaultBranch": "main",
+  "testCommand": "npm test",
+  "protectedPaths": [
+    ".github/",
+    "package.json",
+    "package-lock.json"
+  ],
+  "e2eTriggerPaths": [],
+  "e2eCommand": "",
+  "browserVerify": false,
+  "requireGreen": true,
+  "issuePrefix": "GH",
+  "approvers": [
+    { "login": "your-approver", "id": 1234567 }
+  ],
+  "agent": { "login": "your-org-agent", "id": 7654321 },
+  "people": [],
+  "tracker": {
+    "repo": "your-org/your-repo",
+    "states": "labels"
+  },
+  "area": "app",
+  "areas": ["app"],
+  "defaultArea": "app",
+  "inFlightLimit": 5,
+  "watch": true,
+  "modelLine": true,
+  "adhdStyle": false
+}

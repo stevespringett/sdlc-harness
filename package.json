@@ -1,0 +1,12 @@
+{
+  "name": "sdlc-harness",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A Claude Code SDLC harness: plugin, skills, hooks, and handbook. No dependencies.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test plugins/sdlc-harness/hooks/__tests__/*.test.mjs"
+  }
+}

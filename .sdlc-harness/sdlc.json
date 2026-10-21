@@ -1,0 +1,15 @@
+{
+  "$schema": "../schema/sdlc.schema.json",
+  "integration": "trunk",
+  "defaultBranch": "main",
+  "testCommand": "test -s plugins/sdlc-harness/RULES.md || exit 1; test -s plugins/sdlc-harness/PRINCIPLES.md || exit 1; for f in plugins/sdlc-harness/hooks/*.mjs; do node --check \"$f\" || exit 1; done; for f in .claude-plugin/marketplace.json plugins/sdlc-harness/.claude-plugin/plugin.json plugins/sdlc-harness/hooks/hooks.json schema/sdlc.schema.json schema/sdlc.example.json .sdlc-harness/sdlc.json; do node -e \"JSON.parse(require('fs').readFileSync('$f','utf8'))\" || exit 1; done; node --test plugins/sdlc-harness/hooks/__tests__/*.test.mjs || exit 1; echo harness-ok",
+  "protectedPaths": [
+    "plugins/sdlc-harness/hooks/",
+    "plugins/sdlc-harness/RULES.md"
+  ],
+  "e2eTriggerPaths": [],
+  "e2eCommand": "",
+  "browserVerify": false,
+  "requireGreen": true,
+  "watch": false
+}

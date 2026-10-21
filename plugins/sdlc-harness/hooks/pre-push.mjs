@@ -1,0 +1,393 @@
+#!/usr/bin/env node
+// PreToolUse hook for Bash, the file tools, and GitHub MCP tools (decisions
+// 0003 and 0005). Git's own pre-push hook, git-pre-push.mjs, judges every push
+// against the exact commits it sends. This hook judges no push. It refuses
+// only what would keep git from running that judge, would change GitHub
+// without git, or would take acceptance from the approver:
+//   - a git option that skips hooks (--no-verify and its prefixes);
+//   - config that moves or adds hooks or config for one command (-c or
+//     --config-env with core.hooksPath, include.*, includeIf.*), or for the
+//     shell (GIT_CONFIG_* variables), or a git config write of those keys;
+//   - git commit -n, and an alias (set, passed with -c, or already in the
+//     repo) whose expansion runs any of these;
+//   - git commands that send commits with no pre-push hook (send-pack,
+//     http-push) and push --recurse-submodules;
+//   - a write to the judge's directories or to a repo's .git/config, by a
+//     command or by the Edit and Write tools;
+//   - gh api calls other than a GET, gh pr merge, gh repo and gh release
+//     commands that write, GitHub MCP tools that write, and the judge's
+//     uninstall, which a person runs;
+//   - gh issue close, delete, and transfer: only an approver closes an issue;
+//   - gh pr create or edit whose title or body carries a closing keyword
+//     ("Fixes #12"), which would close the issue when the pull request merges;
+//   - gh issue or pr create with --repo outside the config's allowed owners.
+// It reads the words each command runs, after the shell's quote removal, so a
+// grep or a path that only mentions these runs untouched. A command it cannot
+// read runs: git's hook still judges any push in it, and refuses a closing
+// keyword in any commit message. SDLC_HARNESS_HOOK_BYPASS changes nothing.
+
+import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { basename, resolve } from 'node:path';
+import { NAME, closingKeyword, loadConfig, repoRoot } from './lib.mjs';
+
+const SEPARATORS = new Set([';', '&', '|', '\n', '(', ')', '`']);
+
+/**
+ * The simple commands in a line of shell, as words after quote removal, plus
+ * the targets of their > and >> redirects. Command substitution, groups, and
+ * pipelines split into their own commands. Not a full shell: it never runs
+ * anything, and what it misreads, git's hook still judges.
+ */
+export function commandsOf(text) {
+  const commands = [];
+  let words = [];
+  let redirects = [];
+  let word = null;
+  let redirectNext = false;
+  const endWord = () => {
+    if (word === null) return;
+    if (redirectNext) {
+      redirects.push(word);
+      redirectNext = false;
+    } else words.push(word);
+    word = null;
+  };
+  const endCommand = () => {
+    endWord();
+    if (words.length || redirects.length) commands.push({ words, redirects });
+    words = [];
+    redirects = [];
+  };
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === "'") {
+      const j = text.indexOf("'", i + 1);
+      word = (word ?? '') + text.slice(i + 1, j < 0 ? text.length : j);
+      i = j < 0 ? text.length : j;
+    } else if (c === '"') {
+      let s = '';
+      let j = i + 1;
+      for (; j < text.length && text[j] !== '"'; j++) {
+        if (text[j] === '\\' && '"\\$`\n'.includes(text[j + 1])) s += text[++j];
+        else if (text[j] === '$' && text[j + 1] === '(') {
+          // A substitution inside quotes runs too: read it as its own commands.
+          let depth = 1;
+          let k = j + 2;
+          for (; k < text.length && depth; k++) depth += text[k] === '(' ? 1 : text[k] === ')' ? -1 : 0;
+          commands.push(...commandsOf(text.slice(j + 2, k - 1)));
+          s += text.slice(j, k);
+          j = k - 1;
+        } else s += text[j];
+      }
+      word = (word ?? '') + s;
+      i = j;
+    } else if (c === '\\') {
+      if (text[i + 1] === '\n') i++;
+      else word = (word ?? '') + (text[++i] ?? '');
+    } else if (c === '$' && text[i + 1] === '(') {
+      endCommand();
+      i++;
+    } else if (SEPARATORS.has(c)) endCommand();
+    else if (c === '>' || c === '<') {
+      // 2>&1 and >&2 name no file.
+      if (word !== null && /^\d+$/.test(word)) word = null;
+      endWord();
+      if (text[i + 1] === '>') i++;
+      if (text[i + 1] === '&') {
+        i++;
+        while (/\d|-/.test(text[i + 1] ?? '')) i++;
+        continue;
+      }
+      if (c === '>') redirectNext = true;
+    } else if (c === ' ' || c === '\t') endWord();
+    else if (c === '#' && word === null) {
+      const nl = text.indexOf('\n', i);
+      i = nl < 0 ? text.length : nl - 1;
+    } else word = (word ?? '') + c;
+  }
+  endCommand();
+  return commands;
+}
+
+const WRAPPERS = new Set(['env', 'command', 'exec', 'nohup', 'nice', 'time', 'sudo', 'xargs', 'builtin']);
+const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
+// Commands that write every path they name, and those that write only their
+// destination (the last path, or the one after -t).
+const WRITERS = new Set(['rm', 'mv', 'chmod', 'chown', 'tee', 'truncate', 'dd', 'touch', 'unlink', 'rmdir', 'shred']);
+const COPIERS = new Set(['cp', 'ln', 'install', 'rsync']);
+const GUARDED_KEY = /^(core\.hookspath|include\..*|includeif\..*|remote\..*\.mirror)$/i;
+const ALIAS_KEY = /^alias\./i;
+const GIT_CONFIG_VAR = /^GIT_CONFIG(_[A-Z0-9_]+)?=/;
+// Git options that take the next word as their value, so the value is never
+// read as a flag: `git commit -m "--no-verify ..."` passes no flag.
+const VALUE_OPTS = new Set(['-m', '--message', '-F', '--file', '-C', '-c', '--reuse-message', '--reedit-message', '--author', '--date', '--template', '-t', '--trailer', '--fixup', '--squash', '--cleanup', '--grep', '--format', '--pretty', '--push-option', '--repo', '--receive-pack', '--exec']);
+const BUILTINS = new Set(['add', 'am', 'apply', 'bisect', 'blame', 'branch', 'cat-file', 'checkout', 'cherry-pick', 'clean', 'clone', 'commit', 'config', 'describe', 'diff', 'diff-tree', 'fetch', 'for-each-ref', 'format-patch', 'fsck', 'gc', 'grep', 'hook', 'init', 'log', 'ls-files', 'ls-remote', 'ls-tree', 'merge', 'merge-base', 'mv', 'notes', 'pull', 'push', 'rebase', 'reflog', 'remote', 'reset', 'restore', 'rev-list', 'rev-parse', 'revert', 'rm', 'shortlog', 'show', 'show-ref', 'stash', 'status', 'submodule', 'switch', 'symbolic-ref', 'tag', 'update-ref', 'var', 'version', 'worktree', 'send-pack', 'http-push', 'help']);
+
+// Where the command runs, for reading the aliases a repo already has.
+let CWD = process.cwd();
+
+/** A path the judge lives in, or a repo's config. */
+export function guardedPath(p) {
+  const s = String(p || '').replace(/\/+$/, '');
+  // The plugin's own source (plugins/sdlc-harness/hooks) shares the name and is not the judge's copy.
+  return /(^|\/)(?<!plugins\/)sdlc-harness\/hooks(\/|$)/.test(s) || /(^|\/)\.git\/config$/.test(s) || /(^|\/)\.local\/share\/sdlc-harness$/.test(s) || /(^|\/)\.git\/sdlc-harness$/.test(s);
+}
+
+/** Judge an alias's value: a shell command after "!", else git's words. */
+function aliasVerdict(name, value) {
+  const v = String(value || '').trim();
+  const inner = v.startsWith('!') ? bashVerdict(v.slice(1)) : gitVerdict((commandsOf(v)[0] || { words: [] }).words);
+  return inner ? `the alias ${name} runs something refused (${inner})` : null;
+}
+
+function gitVerdict(args, cwd = CWD) {
+  let i = 0;
+  // Options before the subcommand.
+  for (; i < args.length && args[i].startsWith('-'); i++) {
+    const a = args[i];
+    let pair = null;
+    if (a === '-c' || a === '--config-env') pair = args[++i] || '';
+    else if (a.startsWith('-c')) pair = a.slice(2);
+    else if (a.startsWith('--config-env=')) pair = a.slice('--config-env='.length);
+    else if (a === '-C') cwd = resolve(cwd, args[++i] || '.');
+    else if (['--git-dir', '--work-tree', '--namespace', '--exec-path', '--super-prefix', '--list-cmds', '--attr-source'].includes(a)) i++;
+    if (pair === null) continue;
+    const eq = pair.indexOf('=');
+    const key = eq < 0 ? pair : pair.slice(0, eq);
+    if (GUARDED_KEY.test(key)) return `git ${a} ${key} changes where git finds its hooks or config for this command`;
+    if (ALIAS_KEY.test(key)) {
+      const v = aliasVerdict(key, eq < 0 ? '' : pair.slice(eq + 1));
+      if (v) return v;
+    }
+  }
+  const sub = args[i];
+  const rest = args.slice(i + 1);
+  // Flags only: a value an option takes, and words after --, are not flags.
+  const flags = [];
+  for (let j = 0; j < rest.length; j++) {
+    const a = rest[j];
+    if (a === '--') break;
+    // -o is push's --push-option, with a value; commit's -o (--only) takes none.
+    if (VALUE_OPTS.has(a) || /^-[a-zA-Z]*[mFC]$/.test(a) || (sub === 'push' && a === '-o')) {
+      flags.push(a);
+      j++;
+      continue;
+    }
+    if (a.startsWith('-')) flags.push(a);
+  }
+  for (const a of flags) if (/^--no-v/.test(a)) return `${a} skips git's hooks, including the push judge`;
+  if (sub === 'commit' && flags.some((a) => /^-[a-zA-Z]*n[a-zA-Z]*$/.test(a))) return "git commit -n is commit --no-verify, which skips git's hooks";
+  if (sub === 'send-pack' || sub === 'http-push') return `git ${sub} sends commits without the pre-push hook`;
+  if (sub === 'push' && flags.some((a) => a.startsWith('--recurse-submodules'))) return 'git push --recurse-submodules pushes other repos from inside this one';
+  if (sub === 'config') {
+    if (rest.some((a) => a === '-e' || a === '--edit' || a === 'edit')) return 'git config --edit can change any config, the hooks path included';
+    const writes = rest.some((a) => /^--(unset|unset-all|add|replace-all|remove-section|rename-section)$/.test(a) || ['set', 'unset'].includes(a));
+    const reads = rest.some((a) => /^(--get|--get-all|--get-regexp|--get-urlmatch|-l|--list|get|list)$/.test(a));
+    const plain = rest.filter((a) => !a.startsWith('-') && !['set', 'unset'].includes(a));
+    if (rest.some((a) => GUARDED_KEY.test(a)) && (writes || (!reads && plain.length >= 2))) return 'git config would change the hooks path or config includes';
+    const k = plain.findIndex((a) => ALIAS_KEY.test(a));
+    if (k >= 0 && !reads && plain[k + 1] !== undefined) {
+      const v = aliasVerdict(plain[k], plain[k + 1]);
+      if (v) return v;
+    }
+  }
+  // An alias a repo already has is read as what it runs.
+  if (sub && !BUILTINS.has(sub) && /^[\w.-]+$/.test(sub)) {
+    const r = spawnSync('git', ['config', '--get', `alias.${sub}`], { cwd, encoding: 'utf8', timeout: 2000 });
+    if (r.status === 0 && r.stdout.trim()) {
+      const v = r.stdout.trim();
+      const inner = v.startsWith('!') ? bashVerdict(`${v.slice(1)} ${rest.join(' ')}`) : gitVerdict([...(commandsOf(v)[0] || { words: [] }).words, ...rest], cwd);
+      if (inner) return `the alias ${sub} runs something refused (${inner})`;
+    }
+  }
+  return null;
+}
+
+/** The values a gh command passes for its flags, by long name, from --name v, --name=v, and -x v. */
+function flagValues(args, long, short) {
+  const out = [];
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === `--${long}` || (short && a === `-${short}`)) out.push(args[++i] ?? '');
+    else if (a.startsWith(`--${long}=`)) out.push(a.slice(long.length + 3));
+  }
+  return out;
+}
+
+/** The config's allowed owners for the repo the command runs in, or null when there is no config. */
+function allowedOwners() {
+  try {
+    const root = repoRoot(CWD);
+    const cfg = root && loadConfig(root);
+    return cfg ? cfg.tracker.allowedOwners : null;
+  } catch {
+    return null;
+  }
+}
+
+function issueVerdict(sub, sub2, rest) {
+  if (sub === 'issue' && ['close', 'delete', 'transfer'].includes(sub2)) return `gh issue ${sub2} is for an approver: only an approver closes an issue (decision 0003)`;
+  if ((sub === 'issue' || sub === 'pr') && sub2 === 'create') {
+    const owners = allowedOwners();
+    for (const r of flagValues(rest, 'repo', 'R')) {
+      const o = String(r).split('/')[0].toLowerCase();
+      if (owners && !owners.includes(o)) return `gh ${sub} create --repo ${r} files outside the allowed owners (${owners.join(', ')})`;
+    }
+  }
+  if (sub === 'pr' && (sub2 === 'create' || sub2 === 'edit')) {
+    const texts = [...flagValues(rest, 'title', 't'), ...flagValues(rest, 'body', 'b')];
+    for (const f of flagValues(rest, 'body-file', 'F')) {
+      const p = resolve(CWD, f);
+      if (f === '-' || !existsSync(p)) return `gh pr ${sub2} --body-file ${f}: the hook cannot read the body to check it for a closing keyword; write it to a file`;
+      texts.push(readFileSync(p, 'utf8'));
+    }
+    for (const t of texts) {
+      for (const line of String(t).split('\n')) {
+        const k = closingKeyword(line);
+        if (k) return `gh pr ${sub2} with "${k}" would close the issue when the pull request merges, and only an approver closes an issue`;
+      }
+    }
+  }
+  return null;
+}
+
+function ghVerdict(args) {
+  const [sub, sub2] = args;
+  const issue = issueVerdict(sub, sub2, args.slice(2));
+  if (issue) return issue;
+  if (sub === 'pr' && sub2 === 'merge') return 'gh pr merge changes GitHub without git';
+  if (sub === 'repo' && ['sync', 'create', 'delete', 'rename', 'edit', 'archive', 'unarchive', 'fork'].includes(sub2)) return `gh repo ${sub2} changes GitHub without git`;
+  if (sub === 'repo' && sub2 === 'deploy-key' && ['add', 'delete'].includes(args[2])) return `gh repo deploy-key ${args[2]} changes who can push without git`;
+  if (sub === 'release' && ['create', 'upload', 'delete', 'delete-asset', 'edit'].includes(sub2)) return `gh release ${sub2} writes tags or releases without git`;
+  if (sub !== 'api') return null;
+  const rest = args.slice(1);
+  if (rest.includes('graphql')) return 'gh api graphql can change GitHub without git';
+  let method = null;
+  let fields = false;
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i];
+    const m = a === '-X' || a === '--method' ? rest[i + 1] : a.startsWith('--method=') ? a.slice(9) : /^-X./.test(a) ? a.slice(2) : null;
+    if (m !== null) method = String(m).toUpperCase();
+    if (/^(-f|-F|--field|--raw-field|--input)$/.test(a) || /^(-f|-F).|^--(field|raw-field|input)=/.test(a)) fields = true;
+  }
+  if (method !== null && method !== 'GET') return `gh api ${method} writes to GitHub without git`;
+  // Fields make gh send a POST unless the call says GET.
+  if (fields && method !== 'GET') return 'gh api with fields writes to GitHub without git';
+  return null;
+}
+
+function commandVerdict({ words, redirects }) {
+  for (const r of redirects) if (guardedPath(r)) return `writing ${r} changes the push judge or a repo's config`;
+  let i = 0;
+  for (; i < words.length; i++) {
+    const w = words[i];
+    if (GIT_CONFIG_VAR.test(w)) return `${w.split('=')[0]} changes git's config for the command`;
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) continue;
+    if (WRAPPERS.has(basename(w)) || /^-/.test(w)) continue;
+    break;
+  }
+  if (words.slice(0, i + 1).includes('export') || words[0] === 'export' || words[0] === 'declare' || words[0] === 'typeset') {
+    for (const w of words) if (GIT_CONFIG_VAR.test(w) || /^GIT_CONFIG(_[A-Z0-9_]+)?$/.test(w)) return `${w.split('=')[0]} changes git's config for the commands after it`;
+  }
+  if (words.some((w) => /(^|\/)uninstall-hooks\.mjs$/.test(w))) return 'uninstalling the push judge is for a person at a keyboard';
+  const name = basename(words[i] || '');
+  const args = words.slice(i + 1);
+  if (name === 'git') return gitVerdict(args);
+  if (name === 'gh') return ghVerdict(args);
+  if (SHELLS.has(name)) {
+    // -c, alone or in a cluster such as -lc or -xc, runs the next word.
+    // With -c anywhere among the options (alone or in a cluster such as -lc),
+    // the first word that is not an option is the command string. Options:
+    // -x, +x, clusters, -o name, +o name, and -- before the string.
+    let c = false;
+    let run = null;
+    for (let j = 0; j < args.length; j++) {
+      const a = args[j];
+      if (a === '--') {
+        run = args[j + 1];
+        break;
+      }
+      if (/^[-+][a-zA-Z]*o$/.test(a)) {
+        if (a[0] === '-' && a.includes('c')) c = true;
+        j++;
+        continue;
+      }
+      if (/^[-+][a-zA-Z]+$/.test(a) || /^--[a-z-]+$/.test(a)) {
+        if (/^-[a-zA-Z]*c/.test(a)) c = true;
+        continue;
+      }
+      run = a;
+      break;
+    }
+    if (c && run) return bashVerdict(run);
+    return null;
+  }
+  if (name === 'eval') return bashVerdict(args.join(' '));
+  const inPlace = (name === 'sed' || name === 'perl') && args.some((a) => /^-[a-zA-Z]*i/.test(a) || a.startsWith('--in-place'));
+  const paths = args.filter((a) => !a.startsWith('-'));
+  let targets = [];
+  if (WRITERS.has(name) || inPlace) targets = args.map((a) => (name === 'dd' && a.startsWith('of=') ? a.slice(3) : a)).filter((a) => !a.startsWith('-'));
+  else if (COPIERS.has(name)) {
+    const t = args.indexOf('-t');
+    targets = t >= 0 ? [args[t + 1]] : paths.slice(-1);
+  }
+  for (const target of targets) if (guardedPath(target)) return `${name} ${target} changes the push judge or a repo's config`;
+  return null;
+}
+
+function bashVerdict(command) {
+  for (const c of commandsOf(command)) {
+    const v = commandVerdict(c);
+    if (v) return v;
+  }
+  return null;
+}
+
+// GitHub MCP tools that only read.
+const MCP_READ = /^(get|list|search|read|fetch|download|authenticate|complete_authentication)/;
+
+/** The reason to refuse a tool call, or null to let it run. */
+export function verdict(input) {
+  const tool = String(input.tool_name || 'Bash');
+  const ti = input.tool_input || {};
+  if (tool === 'Bash') {
+    CWD = input.cwd || process.cwd();
+    return bashVerdict(String(ti.command ?? ''));
+  }
+  if (['Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool)) {
+    const p = ti.file_path || ti.notebook_path || '';
+    return guardedPath(p) ? `${tool} ${p} changes the push judge or a repo's config` : null;
+  }
+  if (/^mcp__.*github/i.test(tool)) {
+    const action = tool.split('__').pop();
+    return MCP_READ.test(action) ? null : `${tool} writes to GitHub without git; issue comments, labels, and assignees go through the gh CLI, as the skills say`;
+  }
+  return null;
+}
+
+function main() {
+  let input = {};
+  try {
+    input = JSON.parse(readFileSync(0, 'utf8') || '{}');
+  } catch {
+    process.exit(0);
+  }
+  const reason = verdict(input);
+  if (!reason) process.exit(0);
+  process.stderr.write(
+    [
+      `[${NAME}] refused`,
+      reason + '.',
+      "Git's pre-push hook judges every push (decision 0005): push with plain git, and let it check the commits sent.",
+      'A person at a keyboard can make any of these changes; a session does not.',
+      '',
+    ].join('\n'),
+  );
+  process.exit(2);
+}
+
+// Node runs a module at its real path, so compare real paths: a symlink in the
+// path as typed (macOS's /var, a linked home) must not skip main().
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) main();
