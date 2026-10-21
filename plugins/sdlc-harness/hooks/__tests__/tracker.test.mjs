@@ -116,7 +116,7 @@ describe('reading an issue', () => {
     assert.equal(varOf(calls[0], 'name'), 'tracker');
     assert.equal(issue.comments.length, 2);
     assert.deepEqual(issue.author, { login: 'pat-writer', id: 202, type: 'User' });
-    assert.deepEqual(issue.comments[1].editor, { login: 'octo-lead', id: 101 });
+    assert.deepEqual(issue.comments[1].editor, { login: 'octo-lead', id: 101, type: 'User' });
     assert.equal(issue.status, 'backlog');
     assert.equal(issue.state, 'open');
     // The path the skills walk: fetch, then the policy check.
@@ -127,8 +127,15 @@ describe('reading an issue', () => {
     const node = { ...issueNode({ labels: ['human-architected'] }), author: user('octo-lead', 101), body: `${INTENT}\n\n## Spec\nx`, lastEditedAt: '2026-09-29T00:00:00Z', editor: user('pat-writer', 202) };
     const { gh } = fakeGh([[isQuery('issue(number: $number)'), () => ok({ data: { repository: { issue: node } } })]]);
     const { issue } = fetchIssue(CFG, 12, { gh });
-    assert.deepEqual(issue.editor, { login: 'pat-writer', id: 202 });
+    assert.deepEqual(issue.editor, { login: 'pat-writer', id: 202, type: 'User' });
     assert.equal(checkIssue(issue, CFG).blocked, true);
+  });
+
+  test('a bot that edits an approval, under an approver\'s login, is read as a bot and does not approve', () => {
+    const cfg = normalizeConfig({ ...RAW, approvers: ['octo-lead'] });
+    const comments = [c(user('acme-bot', 303), '## Spec\nx', '2026-09-28T10:30:00Z'), c(user('octo-lead', 101), 'approved', '2026-09-28T11:00:00Z', { lastEditedAt: '2026-09-28T11:02:00Z', editor: { __typename: 'Bot', login: 'octo-lead', databaseId: 5 } })];
+    const { gh } = fakeGh([[isQuery('issue(number: $number)'), () => ok({ data: { repository: { issue: issueNode({ comments }) } } })]]);
+    assert.equal(checkIssue(fetchIssue(cfg, 12, { gh }).issue, cfg).approved, false);
   });
 
   test('a comment edited by someone else, as GitHub reports it, does not approve', () => {

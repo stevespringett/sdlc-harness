@@ -114,7 +114,9 @@ export function commandsOf(text) {
 // Words that run the command after them: wrappers, and the shell keywords a
 // command can follow inside a loop, a test, or a group.
 const WRAPPERS = new Set(['env', 'command', 'exec', 'nohup', 'nice', 'time', 'sudo', 'doas', 'xargs', 'builtin', 'timeout', 'gtimeout', 'stdbuf', 'ionice', 'caffeinate', 'chronic', 'unbuffer', 'do', 'then', 'else', 'elif', 'if', 'while', 'until', '!', '{']);
-const WRAPPER_VALUE_FLAGS = new Set(['-s', '--signal', '-k', '--kill-after', '-n', '--adjustment', '-u', '-g']);
+const WRAPPER_VALUE_FLAGS = new Set(['-s', '--signal', '-k', '--kill-after', '-n', '--adjustment', '-u', '-g', '-C', '--chdir', '-a', '--arg-file', '-o', '-e', '-i', '-I']);
+// Variables a session never reads into, exports, or declares.
+const CHAIN_NAME = /^SDLC_HARNESS_(?:PUSH_)?CHAINED$/;
 // The chain guards' own variables (lib.mjs, git-pre-push.mjs): a session never sets them.
 const CHAIN_VAR = /^SDLC_HARNESS_(?:PUSH_)?CHAINED=/;
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
@@ -311,7 +313,16 @@ function ghAliasVerdict(name, expansion, extra) {
   return inner ? `the gh alias ${name} runs something refused (${inner})` : null;
 }
 
-function ghVerdict(args, { ghRepo = null } = {}) {
+function ghVerdict(argv, { ghRepo = null } = {}) {
+  // gh also takes --repo before the command ("gh -R o/r issue close 1"):
+  // those flags move after it, where the rest of the reading looks.
+  const lead = [];
+  let s = 0;
+  for (; s < argv.length && argv[s].startsWith('-'); s++) {
+    lead.push(argv[s]);
+    if (argv[s] === '-R' || argv[s] === '--repo') lead.push(argv[++s] ?? '');
+  }
+  const args = [argv[s], ...lead, ...argv.slice(s + 1)].filter((a) => a !== undefined);
   const sub = args[0];
   // The subcommand is the first word after it that is neither a flag nor a
   // --repo value: gh takes --repo on the parent too ("gh issue -R o/r close 1").
@@ -326,13 +337,16 @@ function ghVerdict(args, { ghRepo = null } = {}) {
   if (sub === 'alias' && sub2 === 'import') return 'gh alias import sets aliases the hook cannot read; set each with gh alias set';
   if (sub === 'alias' && sub2 === 'set') {
     const words = rest.filter((a) => !a.startsWith('-'));
+    const shell = rest.some((a) => a === '--shell' || a === '-s');
     if (words.length >= 2) {
-      const v = ghAliasVerdict(words[0], words[1], []);
+      const v = ghAliasVerdict(words[0], shell ? `!${words[1]}` : words[1], []);
       if (v) return v;
     }
   }
   if (sub && !GH_COMMANDS.has(sub) && /^[\w.-]+$/.test(sub)) {
     const r = spawnSync('gh', ['alias', 'list'], { cwd: CWD, encoding: 'utf8', timeout: 3000 });
+    // A gh that hangs could hide an alias: refuse rather than guess.
+    if (r.error && r.error.code === 'ETIMEDOUT') return `gh ${sub}: the hook could not read gh's aliases in time, so it cannot tell what this runs`;
     if (r.status === 0) {
       const line = r.stdout.split('\n').find((l) => l.startsWith(`${sub}:`));
       if (line) {
@@ -380,6 +394,11 @@ function commandVerdict({ words, redirects }) {
       continue;
     }
     if (/^-/.test(w)) {
+      // env -S splits its value into the command it runs.
+      if (afterWrapper && (w === '-S' || w === '--split-string') && words[i + 1] !== undefined) {
+        const v = bashVerdict(words.slice(i + 1).join(' '));
+        if (v) return v;
+      }
       // A wrapper flag that takes the next word ("timeout -s KILL 30 git").
       // A flag that takes no value ("sudo -s git ...") never hides git or gh.
       if (afterWrapper && WRAPPER_VALUE_FLAGS.has(w) && !['git', 'gh'].includes(basename(words[i + 1] || ''))) i++;
@@ -389,6 +408,7 @@ function commandVerdict({ words, redirects }) {
     if (afterWrapper && /^\d+(?:\.\d+)?[smhd]?$/.test(w)) continue;
     break;
   }
+  if (['read', 'export', 'declare', 'typeset', 'local', 'readonly'].includes(words[0]) && words.some((w) => CHAIN_NAME.test(w))) return 'the chain guard\'s variable turns off the guard that chains to the repo\'s own hooks';
   if (words.slice(0, i + 1).includes('export') || words[0] === 'export' || words[0] === 'declare' || words[0] === 'typeset') {
     for (const w of words) if (GIT_CONFIG_VAR.test(w) || /^GIT_CONFIG(_[A-Z0-9_]+)?$/.test(w)) return `${w.split('=')[0]} changes git's config for the commands after it`;
     for (const w of words) if (CHAIN_VAR.test(w)) return `${w.split('=')[0]} turns off the guard that chains to the repo's own hooks`;

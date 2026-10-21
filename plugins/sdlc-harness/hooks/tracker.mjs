@@ -79,14 +79,14 @@ const ISSUE_QUERY = `query($owner: String!, $name: String!, $number: Int!, $fiel
     issue(number: $number) {
       id number title body url createdAt lastEditedAt state stateReason
       author { ${AUTHOR} }
-      editor { login ... on User { databaseId } ... on Bot { databaseId } }
+      editor { ${AUTHOR} }
       labels(first: 100) { nodes { name } }
       assignees(first: 20) { nodes { login } }
       subIssues(first: 1) { totalCount }
       ${ITEMS}
       comments(first: 100, after: $after) {
         pageInfo { hasNextPage endCursor }
-        nodes { databaseId body createdAt lastEditedAt url author { ${AUTHOR} } editor { login ... on User { databaseId } ... on Bot { databaseId } } }
+        nodes { databaseId body createdAt lastEditedAt url author { ${AUTHOR} } editor { ${AUTHOR} } }
       }
     }
   }
@@ -133,7 +133,7 @@ export function parseIssue(node, comments, cfg, repo) {
     body: node.body || '',
     createdAt: node.createdAt,
     lastEditedAt: node.lastEditedAt || null,
-    editor: node.editor ? { login: node.editor.login, id: node.editor.databaseId ?? null } : null,
+    editor: person(node.editor),
     author: person(node.author),
     state: String(node.state || '').toLowerCase(),
     stateReason: node.stateReason || null,
@@ -148,7 +148,7 @@ export function parseIssue(node, comments, cfg, repo) {
       body: c.body || '',
       createdAt: c.createdAt,
       lastEditedAt: c.lastEditedAt || null,
-      editor: c.editor ? { login: c.editor.login, id: c.editor.databaseId ?? null } : null,
+      editor: person(c.editor),
     })),
   };
   issue.status = statusOf(issue, cfg);

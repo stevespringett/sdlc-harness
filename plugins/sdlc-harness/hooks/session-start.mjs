@@ -86,7 +86,7 @@ export function rulesParts(text, limit = OUTPUT_LIMIT) {
 // RULES.md that outgrew them is said in the session, not dropped silently.
 const DROPPED_NOTE_ROOM = 300;
 const droppedNote = (n) =>
-  `\n\nRULES.md now needs ${n} parts and hooks.json prints ${RULE_PARTS}: parts ${RULE_PARTS + 1} to ${n} are not shown. Read the rest of ${shownPath(RULES_PATH)} before acting, and tell an approver.`;
+  `\n\nRULES.md now needs ${n} parts and hooks.json prints ${RULE_PARTS}: parts ${RULE_PARTS + 1} to ${n} are not shown. Read the rest of the file this block's file attribute names before acting, and tell an approver.`;
 
 export function renderRules(k, text = readFileSync(RULES_PATH, 'utf8')) {
   const parts = rulesParts(text);

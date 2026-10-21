@@ -172,6 +172,22 @@ describe('install', () => {
     assert.equal(readFileSync(count, 'utf8'), 'x\n');
   });
 
+  test("a git that a repo's hook starts still runs its own hook of the same name", () => {
+    const w = world();
+    installHooks(w.repo, { env: w.env });
+    // A second repo with its own pre-commit, judged through the global hooks path.
+    const inner = join(w.root, 'inner');
+    git(w, w.root, 'init', '-q', '-b', 'main', inner);
+    const mark = join(w.root, 'inner-pre-commit-ran');
+    writeFileSync(join(inner, '.git', 'hooks', 'pre-commit'), `#!/bin/sh\ntouch "${mark}"\n`);
+    chmodSync(join(inner, '.git', 'hooks', 'pre-commit'), 0o755);
+    // The outer repo's own pre-commit commits in the inner repo, as a submodule update or a tool would.
+    writeFileSync(join(w.repo, '.git', 'hooks', 'pre-commit'), `#!/bin/sh\ngit -C "${inner}" commit -q --allow-empty -m nested\n`);
+    chmodSync(join(w.repo, '.git', 'hooks', 'pre-commit'), 0o755);
+    redCommit(w);
+    assert.ok(existsSync(mark), "the nested git's pre-commit ran");
+  });
+
   test("a repo's own earlier hooks path is kept as the one it chains to", () => {
     const w = world();
     git(w, w.repo, 'config', '--local', 'core.hooksPath', '.husky');

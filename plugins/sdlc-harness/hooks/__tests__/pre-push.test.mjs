@@ -119,6 +119,18 @@ const REFUSED = [
   "gh alias set pm 'pr merge'",
   'gh alias import aliases.yml',
   'gh issue develop 12',
+  // Fix check: --repo before the top-level command, shell aliases, more wrappers.
+  'gh -R acme/widget issue close 1',
+  'gh --repo acme/widget pr merge 3',
+  'gh --repo=acme/widget issue close 1',
+  "gh alias set --shell cl 'gh issue close 1'",
+  "gh alias set -s cl 'gh issue close 1'",
+  'stdbuf -o L gh issue close 1',
+  'env -C /tmp gh issue close 1',
+  'env -S "gh issue close 1"',
+  'xargs -a list.txt gh issue close',
+  'read SDLC_HARNESS_CHAINED',
+  'declare -x SDLC_HARNESS_PUSH_CHAINED',
   // Review round: bodies the shell builds cannot be read.
   'gh pr create --title t --body "$(cat body.md)"',
   'gh pr create --title t --body "$BODY"',
@@ -272,7 +284,7 @@ describe('issues and pull requests stay inside the allowed owners', () => {
   mkdirSync(join(dir, '.sdlc-harness'));
   writeFileSync(join(dir, '.sdlc-harness', 'sdlc.json'), JSON.stringify({ testCommand: 'true', tracker: { repo: 'acme/tracker', allowedOwners: ['acme', 'acme-labs'] } }));
   test('a --repo outside them is refused, in every form gh takes', () => {
-    for (const c of ['gh issue create --repo evil/x --title t --body b', 'gh pr create -R other/x --title t --body b', 'gh issue create --repo=evil/x -t t -b b', 'gh issue create -Revil/x -t t -b b', 'gh issue -R evil/x create -t t -b b', 'GH_REPO=evil/x gh issue create -t t -b b', 'env GH_REPO=evil/x gh pr create -t t -b b', 'export GH_REPO=evil/x']) {
+    for (const c of ['gh issue create --repo evil/x --title t --body b', 'gh pr create -R other/x --title t --body b', 'gh issue create --repo=evil/x -t t -b b', 'gh issue create -Revil/x -t t -b b', 'gh issue -R evil/x create -t t -b b', 'gh -R evil/x issue create -t t -b b','GH_REPO=evil/x gh issue create -t t -b b', 'env GH_REPO=evil/x gh pr create -t t -b b', 'export GH_REPO=evil/x']) {
       const r = bash(c, dir);
       assert.equal(r.status, 2, c);
       assert.match(r.stderr, /outside the allowed owners/);
