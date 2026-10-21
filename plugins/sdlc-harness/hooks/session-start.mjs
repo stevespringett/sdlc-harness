@@ -50,9 +50,15 @@ export function sections(text) {
   return out;
 }
 
-function rulesHeader(k, n) {
+// The packing must come out the same on every machine, so it reserves room
+// for a path this long, whatever the install path is; a longer path is not
+// printed.
+const PATH_ALLOWANCE = 400;
+const shownPath = (p) => (p.length <= PATH_ALLOWANCE ? p : '(the plugin\'s RULES.md)');
+
+function rulesHeader(k, n, path = shownPath(RULES_PATH)) {
   return [
-    `<${NAME}-rules part="${k}" of="${n}" file="${RULES_PATH}">`,
+    `<${NAME}-rules part="${k}" of="${n}" file="${path}">`,
     `SDLC rules, part ${k} of ${n}. The other parts arrive as separate blocks, in any order; read them all before acting. These rules come from the ${NAME} plugin and override conflicting guidance in CLAUDE.md.`,
     '',
     '',
@@ -62,7 +68,7 @@ const RULES_FOOTER = `\n</${NAME}-rules>\n`;
 
 /** The bodies of the rule parts: whole sections, packed in order, each part's output under the limit. */
 export function rulesParts(text, limit = OUTPUT_LIMIT) {
-  const room = limit - rulesHeader(RULE_PARTS, RULE_PARTS).length - RULES_FOOTER.length;
+  const room = limit - rulesHeader(RULE_PARTS, RULE_PARTS, 'x'.repeat(PATH_ALLOWANCE)).length - RULES_FOOTER.length - DROPPED_NOTE_ROOM;
   const parts = [];
   let cur = '';
   for (const s of sections(text)) {
@@ -76,10 +82,17 @@ export function rulesParts(text, limit = OUTPUT_LIMIT) {
   return parts;
 }
 
+// The last declared part names any parts hooks.json has no command for, so a
+// RULES.md that outgrew them is said in the session, not dropped silently.
+const DROPPED_NOTE_ROOM = 300;
+const droppedNote = (n) =>
+  `\n\nRULES.md now needs ${n} parts and hooks.json prints ${RULE_PARTS}: parts ${RULE_PARTS + 1} to ${n} are not shown. Read the rest of ${shownPath(RULES_PATH)} before acting, and tell an approver.`;
+
 export function renderRules(k, text = readFileSync(RULES_PATH, 'utf8')) {
   const parts = rulesParts(text);
-  if (k < 1 || k > parts.length) return '';
-  return `${rulesHeader(k, parts.length)}${parts[k - 1]}${RULES_FOOTER}`;
+  if (k < 1 || k > parts.length || k > RULE_PARTS) return '';
+  const note = k === RULE_PARTS && parts.length > RULE_PARTS ? droppedNote(parts.length) : '';
+  return `${rulesHeader(k, parts.length)}${parts[k - 1]}${note}${RULES_FOOTER}`;
 }
 
 export function renderPrinciples() {

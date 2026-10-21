@@ -6,7 +6,7 @@
 import { describe, test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync, execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -98,6 +98,35 @@ const REFUSED = [
   'gh pr create --title="Fix #9" --body ok',
   'gh pr create --body-file -',
   'gh pr create --body-file /nonexistent/body.md',
+  // Review round: a command after a shell keyword, a group, or a wrapper with values.
+  'for i in 1; do git push --no-verify origin main; done',
+  'if true; then git push --no-verify; fi',
+  '{ git push --no-verify origin main; }',
+  '! git push --no-verify origin main',
+  'timeout 30 git push --no-verify origin main',
+  'timeout -s KILL 30 gh issue close 12',
+  'nice -n 5 git push --no-verify',
+  'time -p git push --no-verify',
+  'sudo -s git push --no-verify',
+  'for i in 1; do gh issue close $i; done',
+  // Review round: gh flags before the subcommand, aliases, and attached values.
+  'gh issue -R acme/x close 12',
+  'gh issue --repo=o/r close 12',
+  'gh pr --repo o/r create --title "Fixes #12" --body ok',
+  'gh pr create -t x "-bFixes #12"',
+  'gh pr create "-tFixes #12" -b ok',
+  'gh alias set ic "issue close"',
+  "gh alias set pm 'pr merge'",
+  'gh alias import aliases.yml',
+  'gh issue develop 12',
+  // Review round: bodies the shell builds cannot be read.
+  'gh pr create --title t --body "$(cat body.md)"',
+  'gh pr create --title t --body "$BODY"',
+  'gh pr edit 3 --body "`cat body.md`"',
+  // Review round: the chain guards' own variables.
+  'SDLC_HARNESS_PUSH_CHAINED=1 git push origin main',
+  "sh -c 'SDLC_HARNESS_CHAINED=pre-commit exec git commit -m x'",
+  'export SDLC_HARNESS_CHAINED=pre-commit',
   // QA round: shells with combined flags.
   'bash -lc "git push --no-verify origin main"',
   "sh -xc 'git push --no-verify origin main'",
@@ -195,6 +224,10 @@ const ALLOWED = [
   'gh pr create --title "GH-1: parse dates" --body "Refs #1"',
   'gh pr create --title "GH-2: close the drawer on escape" --body "Fixes a race in the queue."',
   'gh label list --search area:',
+  'timeout 300 npm test',
+  'for f in a b; do echo $f; done',
+  'gh alias set co "pr checkout"',
+  'gh issue -R acme/x view 12',
 ];
 
 describe('commands refused', () => {
@@ -238,8 +271,8 @@ describe('issues and pull requests stay inside the allowed owners', () => {
   execFileSync('git', ['init', '-q', dir]);
   mkdirSync(join(dir, '.sdlc-harness'));
   writeFileSync(join(dir, '.sdlc-harness', 'sdlc.json'), JSON.stringify({ testCommand: 'true', tracker: { repo: 'acme/tracker', allowedOwners: ['acme', 'acme-labs'] } }));
-  test('a --repo outside them is refused', () => {
-    for (const c of ['gh issue create --repo evil/x --title t --body b', 'gh pr create -R other/x --title t --body b', 'gh issue create --repo=evil/x -t t -b b']) {
+  test('a --repo outside them is refused, in every form gh takes', () => {
+    for (const c of ['gh issue create --repo evil/x --title t --body b', 'gh pr create -R other/x --title t --body b', 'gh issue create --repo=evil/x -t t -b b', 'gh issue create -Revil/x -t t -b b', 'gh issue -R evil/x create -t t -b b', 'GH_REPO=evil/x gh issue create -t t -b b', 'env GH_REPO=evil/x gh pr create -t t -b b', 'export GH_REPO=evil/x']) {
       const r = bash(c, dir);
       assert.equal(r.status, 2, c);
       assert.match(r.stderr, /outside the allowed owners/);
@@ -252,6 +285,45 @@ describe('issues and pull requests stay inside the allowed owners', () => {
   test('with no config, the owner check does not apply', () => {
     assert.equal(bash('gh issue create --repo evil/x --title t --body b').status, 0);
   });
+  test('a config that cannot be read refuses a --repo instead of passing it', () => {
+    const bad = mkdtempSync(join(tmpdir(), 'sdlc-owners-bad-'));
+    execFileSync('git', ['init', '-q', bad]);
+    mkdirSync(join(bad, '.sdlc-harness'));
+    writeFileSync(join(bad, '.sdlc-harness', 'sdlc.json'), '{ not json');
+    const r = bash('gh issue create --repo acme/tracker --title t --body b', bad);
+    rmSync(bad, { recursive: true, force: true });
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, /cannot be read/);
+  });
+  test("the config's issue prefix is the closing form refused in a PR", () => {
+    const web = mkdtempSync(join(tmpdir(), 'sdlc-prefix-'));
+    execFileSync('git', ['init', '-q', web]);
+    mkdirSync(join(web, '.sdlc-harness'));
+    writeFileSync(join(web, '.sdlc-harness', 'sdlc.json'), JSON.stringify({ testCommand: 'true', issuePrefix: 'WEB' }));
+    const refusedHere = bash('gh pr create --title "WEB-4: x" --body "fixes WEB-4"', web).status;
+    const allowedHere = bash('gh pr create --title "WEB-4: fix utf-8" --body "Refs #4"', web).status;
+    rmSync(web, { recursive: true, force: true });
+    assert.equal(refusedHere, 2);
+    assert.equal(allowedHere, 0);
+  });
+});
+
+describe('gh aliases already set', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'sdlc-gh-alias-'));
+  after(() => rmSync(dir, { recursive: true, force: true }));
+  // A stub gh on PATH answers `gh alias list` the way gh does.
+  writeFileSync(join(dir, 'gh'), '#!/bin/sh\n[ "$1 $2" = "alias list" ] && printf \'ic: issue close\\nsh2: !gh issue close "$1"\\nv: issue view\\n\'\n');
+  chmodSync(join(dir, 'gh'), 0o755);
+  const withStub = (command) => {
+    const env = { ...process.env, PATH: `${dir}:${process.env.PATH}` };
+    delete env.SDLC_HARNESS_HOOK_BYPASS;
+    return spawnSync(process.execPath, [HOOK], { input: JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd: PLAIN }), encoding: 'utf8', env }).status;
+  };
+  test('an alias whose expansion is refused is refused where it is used', () => {
+    assert.equal(withStub('gh ic 12'), 2);
+    assert.equal(withStub('gh sh2 12'), 2);
+  });
+  test('an ordinary alias runs', () => assert.equal(withStub('gh v 12'), 0));
 });
 
 describe('aliases already in a repo', () => {
@@ -285,15 +357,24 @@ describe('file tools', () => {
     ['Write', '/data/custom-xdg/sdlc-harness/hooks/pre-push'],
     ['Write', '/repo/.git/config'],
     ['MultiEdit', '/repo/.git/config'],
+    // The installed plugin is the code every guard runs.
+    ['Write', '/home/u/.claude/plugins/marketplaces/sdlc-harness/plugins/sdlc-harness/hooks/lib.mjs'],
+    ['Edit', '/home/u/.claude/plugins/cache/sdlc-harness/sdlc-harness/0.1.0/hooks/pre-push.mjs'],
+    ['Edit', '/home/u/.claude/plugins/cache/sdlc-harness/sdlc-harness/0.1.0/RULES.md'],
+    ['Write', '/home/u/.claude/plugins/cache/client-tools/sdlc-harness/0.2.0/hooks/git-pre-push.mjs'],
   ]) {
     test(`${tool} ${path} is refused`, () => {
       assert.equal(run({ tool_name: tool, tool_input: { file_path: path } }).status, 2);
     });
   }
-  test('an edit anywhere else runs, the plugin source and its marketplace copy included', () => {
+  test('a command that writes the installed plugin is refused', () => {
+    assert.equal(bash("echo 'process.exit(0)' > ~/.claude/plugins/cache/sdlc-harness/sdlc-harness/0.1.0/hooks/pre-push.mjs").status, 2);
+    assert.equal(bash('rm -rf ~/.claude/plugins/cache/sdlc-harness').status, 2);
+  });
+  test('an edit anywhere else runs, the plugin source in a checkout and other installed plugins included', () => {
     assert.equal(run({ tool_name: 'Edit', tool_input: { file_path: '/repo/src/app.js' } }).status, 0);
     assert.equal(run({ tool_name: 'Write', tool_input: { file_path: '/repo/plugins/sdlc-harness/hooks/git-pre-push.mjs' } }).status, 0);
-    assert.equal(run({ tool_name: 'Write', tool_input: { file_path: '/home/u/.claude/plugins/marketplaces/sdlc-harness/plugins/sdlc-harness/hooks/lib.mjs' } }).status, 0);
+    assert.equal(run({ tool_name: 'Write', tool_input: { file_path: '/home/u/.claude/plugins/cache/other/other-plugin/1.0.0/hooks/x.mjs' } }).status, 0);
   });
 });
 

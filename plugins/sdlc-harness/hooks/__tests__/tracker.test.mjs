@@ -123,6 +123,14 @@ describe('reading an issue', () => {
     assert.equal(checkIssue(issue, CFG).approved, true);
   });
 
+  test("the body's last edit and its editor are read, so human-architected can check them", () => {
+    const node = { ...issueNode({ labels: ['human-architected'] }), author: user('octo-lead', 101), body: `${INTENT}\n\n## Spec\nx`, lastEditedAt: '2026-09-29T00:00:00Z', editor: user('pat-writer', 202) };
+    const { gh } = fakeGh([[isQuery('issue(number: $number)'), () => ok({ data: { repository: { issue: node } } })]]);
+    const { issue } = fetchIssue(CFG, 12, { gh });
+    assert.deepEqual(issue.editor, { login: 'pat-writer', id: 202 });
+    assert.equal(checkIssue(issue, CFG).blocked, true);
+  });
+
   test('a comment edited by someone else, as GitHub reports it, does not approve', () => {
     const comments = [c(user('acme-bot', 303), '## Spec\nx', '2026-09-28T10:30:00Z'), c(user('octo-lead', 101), 'approved', '2026-09-28T11:00:00Z', { lastEditedAt: '2026-09-28T11:02:00Z', editor: user('pat-writer', 202) })];
     const { gh } = fakeGh([[isQuery('issue(number: $number)'), () => ok({ data: { repository: { issue: issueNode({ comments }) } } })]]);
@@ -202,15 +210,23 @@ describe('setting status', () => {
 
 describe('in flight and the queue', () => {
   const searchNode = (number, area, extra = {}) => ({ number, title: `Issue ${number}`, createdAt: `2026-09-${String(number % 28 + 1).padStart(2, '0')}T00:00:00Z`, updatedAt: '2026-10-01T00:00:00Z', state: 'OPEN', stateReason: null, labels: { nodes: [{ name: `area:${area}` }, { name: 'status:in-progress' }, ...(extra.labels || [])] }, assignees: { nodes: [{ login: 'acme-bot' }] }, projectItems: { nodes: [] } });
-  const search = (nodes) => fakeGh([[isQuery('search(query: $q'), () => ok({ data: { search: { pageInfo: { hasNextPage: false, endCursor: null }, nodes } } })]]);
+  const search = (nodes) => fakeGh([[isQuery('issues(first: 100'), () => ok({ data: { repository: { issues: { pageInfo: { hasNextPage: false, endCursor: null }, nodes } } } })]]);
 
-  test('the search names the tracker repo and the agent, and counts only this area (four own plus others: room left)', () => {
+  test("the repository's own issue list (not search, which lags) names the tracker repo and the agent, and counts only this area (four own plus others: room left)", () => {
     const { gh, calls } = search([1, 2, 3, 4].map((n) => searchNode(n, 'web')).concat([20, 21, 22, 23, 24, 25].map((n) => searchNode(n, 'api'))));
     const v = fetchInFlight(CFG, { gh });
-    assert.equal(varOf(calls[0], 'q'), 'repo:acme/tracker is:issue is:open assignee:acme-bot');
+    assert.ok(!calls[0].some((x) => x.includes('search(')));
+    assert.equal(varOf(calls[0], 'owner'), 'acme');
+    assert.equal(varOf(calls[0], 'name'), 'tracker');
+    assert.equal(varOf(calls[0], 'agent'), 'acme-bot');
     assert.equal(v.full, false);
     assert.deepEqual(v.counted, [1, 2, 3, 4]);
     assert.equal(v.others, 6);
+  });
+
+  test('a list with more pages than the helper reads is an error, never a short count', () => {
+    const { gh } = fakeGh([[isQuery('issues(first: 100'), () => ok({ data: { repository: { issues: { pageInfo: { hasNextPage: true, endCursor: 'C' }, nodes: [] } } } })]]);
+    assert.throws(() => fetchInFlight(CFG, { gh }), /more open issues than the helper reads/);
   });
 
   test('five of its own: full, and every counted issue named', () => {
@@ -247,9 +263,14 @@ describe('the inbox', () => {
       ['11', 11, 'web', true],
       ['12', 12, 'api', false],
       ['13', null, 'web', true],
-      ['14', null, 'web', true],
+      ['14', null, null, false],
     ]);
-    assert.equal(inbox[3].reason, 'outside the tracker repo');
+    assert.equal(inbox[2].reason, 'not about an issue');
+    assert.equal(inbox[3].reason, 'an issue outside the tracker repo');
+  });
+
+  test('an issue thread whose URL is not understood has no owner and stays unread', () => {
+    assert.deepEqual(threadOwner({ repository: 'acme/tracker', type: 'Issue', url: 'https://api.github.com/repositories/99/issues/3' }, CFG).mine, false);
   });
 
   test('a notification whose labels cannot be read is never mine', () => {

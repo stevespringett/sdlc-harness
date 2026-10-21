@@ -183,11 +183,18 @@ function approvalUsable(cfg) {
   return cfg.approvers.length > 0 && Boolean(cfg.agent) && !cfg.approvers.some((a) => a.login === cfg.agent.login);
 }
 
-/** human-architected counts only when an approver applied it. */
+/**
+ * human-architected counts only when an approver vouches for the body: they
+ * wrote it, or their own account wrote the label alone on a line in a
+ * comment. Either way the body must be as they saw it: never edited, or last
+ * edited by an approver. GitHub cannot say who applied a label without the
+ * timeline, so the label alone never counts.
+ */
 export function architectedByApprover(issue, cfg) {
   if (!approvalUsable(cfg)) return false;
   const labels = (issue.labels || []).map((l) => String(l).toLowerCase());
   if (!labels.includes(HUMAN_ARCHITECTED)) return false;
+  if (issue.lastEditedAt !== undefined && issue.lastEditedAt !== null && !(issue.editor && isApprover(issue.editor, cfg))) return false;
   if (isApprover(issue.author, cfg)) return true;
   return (issue.comments || []).some((c) => {
     const b = String(c.body || '');
@@ -227,15 +234,15 @@ function inOrder(comments) {
  * Has an approver approved this issue for work? Only a comment from an
  * approver's own account with a line that is just "approved" or "go"
  * (anywhere in the comment), written after the latest Spec comment by the
- * agent (or anywhere, when there is no Spec comment) and after that Spec's
- * last edit, counts. Every comment needs its createdAt; one without a valid
- * date makes the answer false.
+ * agent and after that Spec's last edit, counts. With no Spec comment by the
+ * agent there is nothing to approve. Every comment needs its createdAt; one
+ * without a valid date makes the answer false.
  */
 export function approvedByApprover(issue, cfg) {
   if (!approvalUsable(cfg)) return false;
   const list = inOrder(issue && issue.comments);
   if (!list) return false;
-  let from = 0;
+  let from = -1;
   let specEdited = null;
   list.forEach((x, pos) => {
     if (isAgent(authorOf(x.c), cfg) && SPEC_COMMENT.test(String(x.c.body || ''))) {
@@ -243,6 +250,7 @@ export function approvedByApprover(issue, cfg) {
       specEdited = x.e;
     }
   });
+  if (from < 0) return false;
   return list
     .slice(from)
     .some((x) => isApprover(authorOf(x.c), cfg) && editedByApprover(x.c, cfg) && (specEdited === null || x.t > specEdited) && APPROVAL_LINE.test(String(x.c.body || '')));
@@ -379,8 +387,9 @@ export function owner(issue, cfg, area = cfg.area) {
 
 /**
  * The in-flight count for an area: open issues assigned to the agent whose
- * status is In Progress and whose owner is that area. Issues another area
- * owns never count. A repo that names no area counts every area's issues.
+ * status is In Progress and whose owner is that area, or cannot be told.
+ * Issues another area owns never count. A repo that names no area counts
+ * every area's issues.
  * Input: issues as tracker.mjs prints them ({ number, state, status, assignees, labels }).
  */
 export function inFlight(issues, cfg, area = cfg.area) {
@@ -390,7 +399,10 @@ export function inFlight(issues, cfg, area = cfg.area) {
   for (const i of Array.isArray(issues) ? issues : []) {
     if (!i || i.state !== 'open' || i.status !== 'in-progress') continue;
     if (!agent || !(i.assignees || []).some((a) => loginOf(a) === agent)) continue;
-    if (!area || owner(i, cfg, area).mine) counted.push(i.number);
+    // One whose owner cannot be told (labels not loaded, several areas) counts
+    // here too, so a gap in the data never lets the limit pass.
+    const who = area ? owner(i, cfg, area) : null;
+    if (!who || who.mine || who.owner === null) counted.push(i.number);
     else others++;
   }
   counted.sort((a, b) => a - b);

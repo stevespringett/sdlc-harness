@@ -221,6 +221,15 @@ test("an approver's human-architected comment edited by someone else does not gr
   assert.equal(check({ title: 'x', body: WITH_SPEC, createdAt: NEW, author: PAT, labels: ['human-architected'], comments }).blocked, true);
 });
 
+test('human-architected stops counting once anyone but an approver edits the body', () => {
+  const vouched = [{ author: LEAD, body: 'human-architected', createdAt: NEW }];
+  const base = { title: 'x', body: WITH_SPEC, createdAt: NEW, labels: ['human-architected'] };
+  assert.equal(check({ ...base, author: LEAD, lastEditedAt: '2026-09-29T00:00:00Z', editor: PAT }).blocked, true, 'approver-written body edited by someone else');
+  assert.equal(check({ ...base, author: PAT, comments: vouched, lastEditedAt: '2026-09-29T00:00:00Z', editor: PAT }).blocked, true, 'vouched body edited after');
+  assert.equal(check({ ...base, author: PAT, comments: vouched, lastEditedAt: '2026-09-29T00:00:00Z', editor: null }).blocked, true, 'editor unknown');
+  assert.equal(check({ ...base, author: LEAD, lastEditedAt: '2026-09-29T00:00:00Z', editor: LEAD }).blocked, false, 'edited by an approver');
+});
+
 test('human-architected does not excuse a missing Intent shape', () => {
   const v = check({ title: 'x', body: '## Spec\nbuild it', createdAt: NEW, author: LEAD, labels: ['human-architected'] });
   assert.deepEqual(v.intent.missing, ['Problem', 'Outcome', 'Constraints']);
@@ -395,10 +404,20 @@ test('a sentence that only mentions approval is not an approval', () => {
   }
 });
 
-test('with no Spec comment, any approval line from an approver counts; without one, nothing does', () => {
-  assert.equal(approved({ comments: [comment(LEAD, 'go', '2026-09-28T11:00:00Z')] }), true);
+test('with no Spec comment by the agent there is nothing to approve, whatever an approver wrote', () => {
+  assert.equal(approved({ comments: [comment(LEAD, 'go', '2026-09-28T11:00:00Z')] }), false);
+  assert.equal(approved({ comments: [comment(BOT, '### Spec\nx', '2026-09-28T10:00:00Z'), comment(LEAD, 'go', '2026-09-28T11:00:00Z')] }), false, 'a heading the helper does not read as a Spec');
   assert.equal(approved({ comments: [] }), false);
   assert.equal(approved({}), false);
+});
+
+test('a bot agent is matched by its login and its type, as GraphQL reports it, and never by a user of the same name', () => {
+  const cfg = normalizeConfig({ ...RAW, agent: 'acme-app[bot]' });
+  const spec = (author) => ({ comments: [comment(author, '## Spec\nx', '2026-09-28T10:00:00Z'), comment(LEAD, 'approved', '2026-09-28T11:00:00Z')] });
+  assert.equal(approved(spec({ login: 'acme-app', id: 9, type: 'Bot' }), cfg), true, 'GraphQL drops the [bot] suffix');
+  assert.equal(approved(spec({ login: 'acme-app[bot]', id: 9 }), cfg), true, 'REST keeps it');
+  assert.equal(approved(spec({ login: 'acme-app', id: 10, type: 'User' }), cfg), false, 'a user named like the app');
+  assert.equal(approved({ comments: [SPEC_BY_AGENT, comment({ login: 'octo-lead', id: 101, type: 'Bot' }, 'approved', '2026-09-28T11:00:00Z')] }), false, 'a bot named like an approver');
 });
 
 test('approval fails closed when any comment has no valid date or a broken edit date', () => {
@@ -545,6 +564,12 @@ test('only open, In Progress issues assigned to the agent count', () => {
     flight(5, 'web', { assignees: ['Acme-Bot'] }),
   ];
   assert.deepEqual(inFlight(issues, CFG).counted, [1, 5]);
+});
+
+test('an issue whose owner cannot be told counts against the limit, so missing data never lets it pass', () => {
+  const v = inFlight([flight(1, 'web', { labels: undefined }), flight(2, 'web', { labels: ['area:api', 'area:docs'] }), flight(3, 'api')], CFG, 'web');
+  assert.deepEqual(v.counted, [1, 2]);
+  assert.equal(v.others, 1);
 });
 
 test('an issue with no area counts for the default area, by the same owner rule', () => {

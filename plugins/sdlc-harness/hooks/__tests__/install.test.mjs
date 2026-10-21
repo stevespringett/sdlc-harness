@@ -158,6 +158,20 @@ describe('install', () => {
     assert.equal(readFileSync(count, 'utf8'), 'x\n');
   });
 
+  test('a circling chain whose other link spawns the next instead of exec-ing it still ends', () => {
+    const w = world();
+    const { localDir } = installHooks(w.repo, { env: w.env });
+    const other = join(w.root, 'other-tool-hooks');
+    mkdirSync(other);
+    const count = join(w.root, 'other-ran');
+    // No exec: each pass would see a new $PPID, so the guard cannot rest on it.
+    writeFileSync(join(other, 'pre-commit'), `#!/bin/sh\necho x >> "${count}"\n"${join(localDir, 'pre-commit')}" "$@"\n`);
+    chmodSync(join(other, 'pre-commit'), 0o755);
+    writeFileSync(join(localDir, 'previous-hooks-path'), `${other}\n`);
+    redCommit(w);
+    assert.equal(readFileSync(count, 'utf8'), 'x\n');
+  });
+
   test("a repo's own earlier hooks path is kept as the one it chains to", () => {
     const w = world();
     git(w, w.repo, 'config', '--local', 'core.hooksPath', '.husky');

@@ -13,7 +13,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, cpSync } f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { OUTPUT_LIMIT, RULE_PARTS, rulesParts, sections, watchText } from '../session-start.mjs';
+import { OUTPUT_LIMIT, RULE_PARTS, RULES_PATH, renderRules, rulesParts, sections, watchText } from '../session-start.mjs';
 import { normalizeConfig } from '../lib.mjs';
 
 const PLUGIN = fileURLToPath(new URL('../..', import.meta.url));
@@ -198,6 +198,21 @@ describe('the splitter', () => {
     const parts = rulesParts(text, 7000);
     assert.deepEqual(parts.map((p) => sections(p).map((s) => s.split('\n')[0])), [['# T', '## A', '## B'], ['## C']]);
     assert.equal(parts.join('\n\n'), text);
+  });
+
+  test('the packing reserves room for a long install path, so it comes out the same on every machine', () => {
+    for (const k of [1, 2, 3, 4]) {
+      const out = renderRules(k);
+      if (out) assert.ok(out.length + 400 <= OUTPUT_LIMIT + RULES_PATH.length, `part ${k} would pass the limit under a 400-character path`);
+    }
+  });
+
+  test('a RULES.md that outgrows the declared parts says so in the last one, never dropping text silently', () => {
+    const text = ['# T', ...Array.from({ length: 6 }, (_, i) => `## S${i}\n${'s'.repeat(6000)}`)].join('\n\n');
+    assert.ok(rulesParts(text).length > RULE_PARTS);
+    assert.match(renderRules(RULE_PARTS, text), /RULES\.md now needs \d+ parts and hooks\.json prints 4/);
+    assert.equal(renderRules(RULE_PARTS + 1, text), '');
+    assert.ok(renderRules(RULE_PARTS, text).length <= OUTPUT_LIMIT);
   });
 
   test('a section bigger than one output still gets its own part, so the size test can name it', () => {

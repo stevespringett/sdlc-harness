@@ -111,7 +111,12 @@ export function commandsOf(text) {
   return commands;
 }
 
-const WRAPPERS = new Set(['env', 'command', 'exec', 'nohup', 'nice', 'time', 'sudo', 'xargs', 'builtin']);
+// Words that run the command after them: wrappers, and the shell keywords a
+// command can follow inside a loop, a test, or a group.
+const WRAPPERS = new Set(['env', 'command', 'exec', 'nohup', 'nice', 'time', 'sudo', 'doas', 'xargs', 'builtin', 'timeout', 'gtimeout', 'stdbuf', 'ionice', 'caffeinate', 'chronic', 'unbuffer', 'do', 'then', 'else', 'elif', 'if', 'while', 'until', '!', '{']);
+const WRAPPER_VALUE_FLAGS = new Set(['-s', '--signal', '-k', '--kill-after', '-n', '--adjustment', '-u', '-g']);
+// The chain guards' own variables (lib.mjs, git-pre-push.mjs): a session never sets them.
+const CHAIN_VAR = /^SDLC_HARNESS_(?:PUSH_)?CHAINED=/;
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
 // Commands that write every path they name, and those that write only their
 // destination (the last path, or the one after -t).
@@ -128,10 +133,27 @@ const BUILTINS = new Set(['add', 'am', 'apply', 'bisect', 'blame', 'branch', 'ca
 // Where the command runs, for reading the aliases a repo already has.
 let CWD = process.cwd();
 
-/** A path the judge lives in, or a repo's config. */
+// The plugin this hook runs from. An installed copy (under ~/.claude/plugins)
+// is the code every guard runs, so a session never writes it; a checkout a
+// person develops the plugin in is not under that folder and stays editable.
+const PLUGIN_ROOT = (() => {
+  try {
+    return realpathSync(fileURLToPath(new URL('..', import.meta.url))).replace(/\/+$/, '');
+  } catch {
+    return '';
+  }
+})();
+const INSTALLED = /(^|\/)\.claude\/plugins\/(?:cache|marketplaces)\/(?:[^/]+\/)*?[^/]*sdlc-harness[^/]*(\/|$)/;
+
+/** A path the judge lives in, the installed plugin, or a repo's config. */
 export function guardedPath(p) {
   const s = String(p || '').replace(/\/+$/, '');
-  // The plugin's own source (plugins/sdlc-harness/hooks) shares the name and is not the judge's copy.
+  if (INSTALLED.test(s)) return true;
+  if (PLUGIN_ROOT.includes('/.claude/plugins/')) {
+    const abs = resolve(CWD, s.replace(/^~(?=\/|$)/, process.env.HOME || '~'));
+    if (abs === PLUGIN_ROOT || abs.startsWith(`${PLUGIN_ROOT}/`)) return true;
+  }
+  // The plugin's source in a checkout (plugins/sdlc-harness/hooks) shares the name and is not the judge's copy.
   return /(^|\/)(?<!plugins\/)sdlc-harness\/hooks(\/|$)/.test(s) || /(^|\/)\.git\/config$/.test(s) || /(^|\/)\.local\/share\/sdlc-harness$/.test(s) || /(^|\/)\.git\/sdlc-harness$/.test(s);
 }
 
@@ -205,47 +227,73 @@ function gitVerdict(args, cwd = CWD) {
   return null;
 }
 
-/** The values a gh command passes for its flags, by long name, from --name v, --name=v, and -x v. */
+/** The values a gh command passes for a flag: --name v, --name=v, -x v, and -xv. */
 function flagValues(args, long, short) {
   const out = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === `--${long}` || (short && a === `-${short}`)) out.push(args[++i] ?? '');
     else if (a.startsWith(`--${long}=`)) out.push(a.slice(long.length + 3));
+    else if (short && a.startsWith(`-${short}`) && a.length > 2 && a[1] !== '-') out.push(a.slice(2).replace(/^=/, ''));
   }
   return out;
 }
 
-/** The config's allowed owners for the repo the command runs in, or null when there is no config. */
-function allowedOwners() {
+/**
+ * The repo config where the command runs: { cfg } when there is one, null
+ * when the folder is not a managed repo, or { error } when its config cannot
+ * be read, so a check that needs it refuses instead of passing.
+ */
+function hookConfig() {
   try {
     const root = repoRoot(CWD);
     const cfg = root && loadConfig(root);
-    return cfg ? cfg.tracker.allowedOwners : null;
-  } catch {
-    return null;
+    return cfg ? { cfg } : null;
+  } catch (e) {
+    return { error: e.message };
   }
 }
 
-function issueVerdict(sub, sub2, rest) {
+/** Why a target repo is outside the allowed owners, or null. */
+function ownerVerdict(what, repo) {
+  const hc = hookConfig();
+  if (!hc) return null;
+  if (hc.error) return `${what} ${repo}: the repo's config cannot be read (${hc.error}), so the allowed owners are unknown`;
+  const owners = hc.cfg.tracker.allowedOwners;
+  const o = String(repo).split('/')[0].toLowerCase();
+  return owners.includes(o) ? null : `${what} ${repo} files outside the allowed owners (${owners.join(', ')})`;
+}
+
+const prefixHere = () => {
+  const hc = hookConfig();
+  return (hc && hc.cfg && hc.cfg.issuePrefix) || 'GH';
+};
+
+// Text the shell builds ("$(cat body.md)", "$BODY", backticks) is not what
+// the hook reads, so a title or body that carries it is refused.
+const SHELL_BUILT = /[$`]/;
+
+function issueVerdict(sub, sub2, rest, ghRepo) {
   if (sub === 'issue' && ['close', 'delete', 'transfer'].includes(sub2)) return `gh issue ${sub2} is for an approver: only an approver closes an issue (decision 0003)`;
+  if (sub === 'issue' && sub2 === 'develop') return 'gh issue develop links a branch to the issue, and GitHub closes a linked issue when its pull request merges; only an approver closes an issue';
   if ((sub === 'issue' || sub === 'pr') && sub2 === 'create') {
-    const owners = allowedOwners();
-    for (const r of flagValues(rest, 'repo', 'R')) {
-      const o = String(r).split('/')[0].toLowerCase();
-      if (owners && !owners.includes(o)) return `gh ${sub} create --repo ${r} files outside the allowed owners (${owners.join(', ')})`;
+    for (const r of [...flagValues(rest, 'repo', 'R'), ...(ghRepo ? [ghRepo] : [])]) {
+      const v = ownerVerdict(`gh ${sub} create --repo`, r);
+      if (v) return v;
     }
   }
   if (sub === 'pr' && (sub2 === 'create' || sub2 === 'edit')) {
     const texts = [...flagValues(rest, 'title', 't'), ...flagValues(rest, 'body', 'b')];
+    if (texts.some((t) => SHELL_BUILT.test(t))) return `gh pr ${sub2}: a title or body the shell builds cannot be checked for a closing keyword; write it to a file and pass --body-file`;
     for (const f of flagValues(rest, 'body-file', 'F')) {
       const p = resolve(CWD, f);
       if (f === '-' || !existsSync(p)) return `gh pr ${sub2} --body-file ${f}: the hook cannot read the body to check it for a closing keyword; write it to a file`;
       texts.push(readFileSync(p, 'utf8'));
     }
+    const prefix = prefixHere();
     for (const t of texts) {
       for (const line of String(t).split('\n')) {
-        const k = closingKeyword(line);
+        const k = closingKeyword(line, prefix);
         if (k) return `gh pr ${sub2} with "${k}" would close the issue when the pull request merges, and only an approver closes an issue`;
       }
     }
@@ -253,22 +301,60 @@ function issueVerdict(sub, sub2, rest) {
   return null;
 }
 
-function ghVerdict(args) {
-  const [sub, sub2] = args;
-  const issue = issueVerdict(sub, sub2, args.slice(2));
+// gh's own commands; any other first word may be an alias.
+const GH_COMMANDS = new Set(['agent-task', 'alias', 'api', 'attestation', 'auth', 'browse', 'cache', 'co', 'codespace', 'completion', 'config', 'copilot', 'extension', 'gist', 'gpg-key', 'help', 'issue', 'label', 'org', 'pr', 'preview', 'project', 'release', 'repo', 'ruleset', 'run', 'search', 'secret', 'ssh-key', 'status', 'variable', 'workflow']);
+
+/** Judge a gh alias's expansion: a shell command after "!", else gh's words. */
+function ghAliasVerdict(name, expansion, extra) {
+  const v = String(expansion || '').trim();
+  const inner = v.startsWith('!') ? bashVerdict(`${v.slice(1)} ${extra.join(' ')}`) : ghVerdict([...(commandsOf(v)[0] || { words: [] }).words, ...extra]);
+  return inner ? `the gh alias ${name} runs something refused (${inner})` : null;
+}
+
+function ghVerdict(args, { ghRepo = null } = {}) {
+  const sub = args[0];
+  // The subcommand is the first word after it that is neither a flag nor a
+  // --repo value: gh takes --repo on the parent too ("gh issue -R o/r close 1").
+  let at = 1;
+  for (; at < args.length; at++) {
+    const a = args[at];
+    if (a === '-R' || a === '--repo') at++;
+    else if (!a.startsWith('-')) break;
+  }
+  const sub2 = args[at];
+  const rest = [...args.slice(1, at), ...args.slice(at + 1)];
+  if (sub === 'alias' && sub2 === 'import') return 'gh alias import sets aliases the hook cannot read; set each with gh alias set';
+  if (sub === 'alias' && sub2 === 'set') {
+    const words = rest.filter((a) => !a.startsWith('-'));
+    if (words.length >= 2) {
+      const v = ghAliasVerdict(words[0], words[1], []);
+      if (v) return v;
+    }
+  }
+  if (sub && !GH_COMMANDS.has(sub) && /^[\w.-]+$/.test(sub)) {
+    const r = spawnSync('gh', ['alias', 'list'], { cwd: CWD, encoding: 'utf8', timeout: 3000 });
+    if (r.status === 0) {
+      const line = r.stdout.split('\n').find((l) => l.startsWith(`${sub}:`));
+      if (line) {
+        const v = ghAliasVerdict(sub, line.slice(sub.length + 1).trim().replace(/^'(.*)'$/, '$1'), args.slice(1));
+        if (v) return v;
+      }
+    }
+  }
+  const issue = issueVerdict(sub, sub2, rest, ghRepo);
   if (issue) return issue;
   if (sub === 'pr' && sub2 === 'merge') return 'gh pr merge changes GitHub without git';
   if (sub === 'repo' && ['sync', 'create', 'delete', 'rename', 'edit', 'archive', 'unarchive', 'fork'].includes(sub2)) return `gh repo ${sub2} changes GitHub without git`;
   if (sub === 'repo' && sub2 === 'deploy-key' && ['add', 'delete'].includes(args[2])) return `gh repo deploy-key ${args[2]} changes who can push without git`;
   if (sub === 'release' && ['create', 'upload', 'delete', 'delete-asset', 'edit'].includes(sub2)) return `gh release ${sub2} writes tags or releases without git`;
   if (sub !== 'api') return null;
-  const rest = args.slice(1);
-  if (rest.includes('graphql')) return 'gh api graphql can change GitHub without git';
+  const api = args.slice(1);
+  if (api.includes('graphql')) return 'gh api graphql can change GitHub without git';
   let method = null;
   let fields = false;
-  for (let i = 0; i < rest.length; i++) {
-    const a = rest[i];
-    const m = a === '-X' || a === '--method' ? rest[i + 1] : a.startsWith('--method=') ? a.slice(9) : /^-X./.test(a) ? a.slice(2) : null;
+  for (let i = 0; i < api.length; i++) {
+    const a = api[i];
+    const m = a === '-X' || a === '--method' ? api[i + 1] : a.startsWith('--method=') ? a.slice(9) : /^-X./.test(a) ? a.slice(2) : null;
     if (m !== null) method = String(m).toUpperCase();
     if (/^(-f|-F|--field|--raw-field|--input)$/.test(a) || /^(-f|-F).|^--(field|raw-field|input)=/.test(a)) fields = true;
   }
@@ -281,21 +367,43 @@ function ghVerdict(args) {
 function commandVerdict({ words, redirects }) {
   for (const r of redirects) if (guardedPath(r)) return `writing ${r} changes the push judge or a repo's config`;
   let i = 0;
+  let ghRepo = null;
+  let afterWrapper = false;
   for (; i < words.length; i++) {
     const w = words[i];
     if (GIT_CONFIG_VAR.test(w)) return `${w.split('=')[0]} changes git's config for the command`;
+    if (CHAIN_VAR.test(w)) return `${w.split('=')[0]} turns off the guard that chains to the repo's own hooks`;
+    if (/^GH_REPO=/.test(w)) ghRepo = w.slice(8);
     if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) continue;
-    if (WRAPPERS.has(basename(w)) || /^-/.test(w)) continue;
+    if (WRAPPERS.has(basename(w))) {
+      afterWrapper = true;
+      continue;
+    }
+    if (/^-/.test(w)) {
+      // A wrapper flag that takes the next word ("timeout -s KILL 30 git").
+      // A flag that takes no value ("sudo -s git ...") never hides git or gh.
+      if (afterWrapper && WRAPPER_VALUE_FLAGS.has(w) && !['git', 'gh'].includes(basename(words[i + 1] || ''))) i++;
+      continue;
+    }
+    // A wrapper's own number: timeout's duration, nice's adjustment.
+    if (afterWrapper && /^\d+(?:\.\d+)?[smhd]?$/.test(w)) continue;
     break;
   }
   if (words.slice(0, i + 1).includes('export') || words[0] === 'export' || words[0] === 'declare' || words[0] === 'typeset') {
     for (const w of words) if (GIT_CONFIG_VAR.test(w) || /^GIT_CONFIG(_[A-Z0-9_]+)?$/.test(w)) return `${w.split('=')[0]} changes git's config for the commands after it`;
+    for (const w of words) if (CHAIN_VAR.test(w)) return `${w.split('=')[0]} turns off the guard that chains to the repo's own hooks`;
+    for (const w of words) {
+      if (/^GH_REPO=/.test(w)) {
+        const v = ownerVerdict('GH_REPO', w.slice(8));
+        if (v) return v;
+      }
+    }
   }
   if (words.some((w) => /(^|\/)uninstall-hooks\.mjs$/.test(w))) return 'uninstalling the push judge is for a person at a keyboard';
   const name = basename(words[i] || '');
   const args = words.slice(i + 1);
   if (name === 'git') return gitVerdict(args);
-  if (name === 'gh') return ghVerdict(args);
+  if (name === 'gh') return ghVerdict(args, { ghRepo });
   if (SHELLS.has(name)) {
     // -c, alone or in a cluster such as -lc or -xc, runs the next word.
     // With -c anywhere among the options (alone or in a cluster such as -lc),

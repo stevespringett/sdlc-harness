@@ -534,9 +534,22 @@ describe('closing keywords (only an approver closes an issue)', () => {
   });
 
   test('naming an issue without a closing keyword is not closing', () => {
-    for (const line of ['GH-12: fix the parser', 'Refs #12', 'the fix for #12 is next', 'suffix #1', 'prefixes #2', 'Closes the drawer on escape', 'fixes a race in the queue']) {
+    for (const line of ['GH-12: fix the parser', 'Refs #12', 'the fix for #12 is next', 'suffix #1', 'prefixes #2', 'Closes the drawer on escape', 'fixes a race in the queue', 'Fix utf-8 decoding', 'fixes sha-1 lookup', 'close http-2 streams']) {
       assert.equal(closingKeyword(line), null, line);
     }
+  });
+
+  test("the prefix form is the config's own prefix only", () => {
+    assert.ok(closingKeyword('fixes WEB-3', 'WEB'));
+    assert.equal(closingKeyword('fixes GH-3', 'WEB'), null);
+    assert.ok(closingKeyword('fixes #3', 'WEB'), 'the # form is always closing');
+  });
+
+  test('long runs of spaces are read in time proportional to their length', () => {
+    const start = Date.now();
+    for (const pad of [' '.repeat(200_000), '\t'.repeat(200_000), ': '.repeat(100_000)]) closingKeyword(`fix${pad}`);
+    assert.ok(Date.now() - start < 1000, `took ${Date.now() - start} ms`);
+    assert.ok(closingKeyword(`Fixes${' '.repeat(50_000)}#12`), 'the spaces collapse, the phrase is still read');
   });
 
   test('a commit message with a closing keyword is refused and named', () => {

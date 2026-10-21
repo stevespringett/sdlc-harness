@@ -85,14 +85,22 @@ export function secretsIn(line) {
 
 // GitHub closes an issue when a commit on the default branch (or a merged
 // pull request) says one of these words before a reference to it: "#12",
-// "owner/repo#12", or the issue's URL. A prefix form ("Fixes GH-12") is
-// refused too, so a message never relies on GitHub ignoring it.
-const CLOSING =
-  /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)[ \t]*:?[ \t]+(?:(?:[\w.-]{1,100}\/[\w.-]{1,100})?#\d+|https?:\/\/[^\s]{1,200}\/issues\/\d+|[A-Za-z][A-Za-z0-9]{0,15}-\d+\b)/i;
+// "owner/repo#12", or the issue's URL, with or without a colon. The config's
+// own prefix form ("Fixes GH-12") is refused too, so a message never relies
+// on GitHub ignoring it; another word with a number ("Fix utf-8") is not.
+const closingRe = (prefix) =>
+  new RegExp(
+    `\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)(?: ?: ?| )(?:(?:[\\w.-]{1,100}\\/[\\w.-]{1,100})?#\\d+|https?:\\/\\/\\S{1,200}\\/issues\\/\\d+|${prefix}-\\d+\\b)`,
+    'i',
+  );
 
-/** The closing phrase a line of text carries, or null. */
-export function closingKeyword(line) {
-  const m = CLOSING.exec(String(line || ''));
+/**
+ * The closing phrase a line of text carries, or null. Runs of spaces and tabs
+ * collapse to one first, so no input makes the match backtrack.
+ */
+export function closingKeyword(line, prefix = DEFAULT_PREFIX) {
+  const p = /^[A-Za-z][A-Za-z0-9]{0,15}$/.test(String(prefix)) ? prefix : DEFAULT_PREFIX;
+  const m = closingRe(p).exec(String(line || '').replace(/[ \t]+/g, ' '));
   return m ? m[0] : null;
 }
 
@@ -382,7 +390,7 @@ function judgeLine(cwd, remoteUrl, line, state) {
   const closing = [];
   commits.forEach((c, i) => {
     for (const l of messages[i].split('\n')) {
-      const k = closingKeyword(l);
+      const k = closingKeyword(l, cfg.issuePrefix);
       if (k) closing.push(`  ${c.slice(0, 12)}: "${k}"`);
     }
   });

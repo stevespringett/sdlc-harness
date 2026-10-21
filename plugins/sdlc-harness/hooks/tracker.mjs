@@ -77,8 +77,9 @@ const ITEMS = 'projectItems(first: 20) { nodes { id project { id number owner { 
 const ISSUE_QUERY = `query($owner: String!, $name: String!, $number: Int!, $field: String!, $after: String) {
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
-      id number title body url createdAt state stateReason
+      id number title body url createdAt lastEditedAt state stateReason
       author { ${AUTHOR} }
+      editor { login ... on User { databaseId } ... on Bot { databaseId } }
       labels(first: 100) { nodes { name } }
       assignees(first: 20) { nodes { login } }
       subIssues(first: 1) { totalCount }
@@ -131,6 +132,8 @@ export function parseIssue(node, comments, cfg, repo) {
     title: node.title,
     body: node.body || '',
     createdAt: node.createdAt,
+    lastEditedAt: node.lastEditedAt || null,
+    editor: node.editor ? { login: node.editor.login, id: node.editor.databaseId ?? null } : null,
     author: person(node.author),
     state: String(node.state || '').toLowerCase(),
     stateReason: node.stateReason || null,
@@ -171,23 +174,30 @@ export function fetchIssue(cfg, number, { gh = runGh, repo = cfg.tracker.repo } 
   throw new TrackerError(`issue #${number} has more comments than the helper reads`);
 }
 
-const SEARCH_QUERY = `query($q: String!, $field: String!, $after: String) {
-  search(query: $q, type: ISSUE, first: 100, after: $after) {
-    pageInfo { hasNextPage endCursor }
-    nodes { ... on Issue { number title createdAt updatedAt state stateReason labels(first: 100) { nodes { name } } assignees(first: 20) { nodes { login } } ${ITEMS} } }
+// The repository's own issue list, not search: search lags behind recent
+// changes, and a count that lags lets the in-flight limit pass.
+const ASSIGNED_QUERY = `query($owner: String!, $name: String!, $agent: String!, $field: String!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    issues(first: 100, after: $after, states: [OPEN], filterBy: { assignee: $agent }) {
+      pageInfo { hasNextPage endCursor }
+      nodes { number title createdAt updatedAt state stateReason labels(first: 100) { nodes { name } } assignees(first: 20) { nodes { login } } ${ITEMS} }
+    }
   }
 }`;
 
 /** Open issues assigned to the agent, each with its status, labels, and assignees. */
 export function fetchAssigned(cfg, { gh = runGh } = {}) {
   if (!cfg.agent) throw new TrackerError('the config names no agent account');
+  const { owner: o, name } = splitRepo(cfg.tracker.repo);
   const field = cfg.tracker.project ? cfg.tracker.project.field : 'Status';
-  const q = `repo:${cfg.tracker.repo} is:issue is:open assignee:${cfg.agent.login}`;
+  const agent = cfg.agent.login.replace(/\[bot\]$/, '');
   const out = [];
   let after = null;
   for (let page = 0; page < 20; page++) {
-    const data = graphql(gh, SEARCH_QUERY, { q, field, after }, 'list the agent\'s open issues');
-    for (const n of data.search.nodes) {
+    const data = graphql(gh, ASSIGNED_QUERY, { owner: o, name, agent, field, after }, 'list the agent\'s open issues');
+    const conn = data && data.repository && data.repository.issues;
+    if (!conn) throw new TrackerError(`could not list the agent's open issues: ${cfg.tracker.repo} not found`);
+    for (const n of conn.nodes) {
       if (!n || n.number === undefined) continue;
       const labels = n.labels.nodes.map((l) => l.name);
       const item = projectStatusOf(n.projectItems ? n.projectItems.nodes : [], cfg);
@@ -195,10 +205,11 @@ export function fetchAssigned(cfg, { gh = runGh } = {}) {
       i.status = statusOf(i, cfg);
       out.push(i);
     }
-    if (!data.search.pageInfo.hasNextPage) return out;
-    after = data.search.pageInfo.endCursor;
+    if (!conn.pageInfo.hasNextPage) return out;
+    after = conn.pageInfo.endCursor;
   }
-  return out;
+  // A partial list would undercount; the caller refuses instead.
+  throw new TrackerError('the agent has more open issues than the helper reads');
 }
 
 /** The area's in-flight count, with every issue it counted. */
@@ -284,12 +295,15 @@ export function issueNumberOf(url, repo) {
 
 /**
  * Who owns a notification thread: the area of the issue it is about. A
- * thread about something that is not an issue in the tracker repo (a pull
- * request, a release, another repo) belongs to the default area.
+ * thread about something that is not an issue (a pull request, a release, a
+ * commit) belongs to the default area.
  */
 export function threadOwner(thread, cfg, { gh = runGh } = {}) {
   const inTracker = String(thread.repository || '').toLowerCase() === String(cfg.tracker.repo).toLowerCase();
   const number = thread.type === 'Issue' && inTracker ? issueNumberOf(thread.url, cfg.tracker.repo) : null;
+  // A thread about an issue whose area cannot be read here (another repo, a
+  // renamed or transferred one, an odd URL) has no owner: it stays unread.
+  if (thread.type === 'Issue' && number === null) return { number: null, mine: false, owner: null, reason: inTracker ? 'issue URL not understood' : 'an issue outside the tracker repo' };
   if (number === null) {
     const dflt = cfg.defaultArea;
     return { number: null, mine: Boolean(cfg.area) && dflt === cfg.area, owner: dflt || null, reason: inTracker ? 'not about an issue' : 'outside the tracker repo' };

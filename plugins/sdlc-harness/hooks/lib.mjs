@@ -52,11 +52,22 @@ function people(list) {
   return (Array.isArray(list) ? list : list ? [list] : []).map(person).filter(Boolean);
 }
 
-/** Does a comment or issue author ({ login, id }) match a configured person? */
+/**
+ * Does a comment or issue author ({ login, id, type }) match a configured
+ * person? A GitHub App's bot is "name[bot]" in the config and in REST, but
+ * GraphQL gives its login without the suffix and its type as Bot, so the
+ * suffix and the type are read together: a bot never matches a user of the
+ * same name, and a user never matches a bot.
+ */
 export function isPerson(author, who) {
   if (!author || !who) return false;
-  const login = typeof author === 'string' ? author : author.login;
-  if (typeof login !== 'string' || login.toLowerCase() !== who.login) return false;
+  const raw = typeof author === 'string' ? author : author.login;
+  if (typeof raw !== 'string') return false;
+  const type = typeof author === 'object' ? author.type : null;
+  const authorBot = /\[bot\]$/i.test(raw) || type === 'Bot';
+  const whoBot = /\[bot\]$/.test(who.login);
+  if (authorBot !== whoBot) return false;
+  if (raw.toLowerCase().replace(/\[bot\]$/, '') !== who.login.replace(/\[bot\]$/, '')) return false;
   if (who.id === null) return true;
   return typeof author === 'object' && Number(author.id) === who.id;
 }
@@ -273,11 +284,13 @@ export function prePushShim(dir, node = process.execPath, { local = false } = {}
 
 // Another tool that installs the same way can record this directory as its
 // previous hooks path while this one records it, so a chain could run in a
-// circle. A shim marks the chain it starts (the hook name and git's pid, which
-// exec keeps) and ends it when the circle comes back.
+// circle. A shim marks the chain it starts with the hook's name, which every
+// link inherits whether it execs or spawns the next, and ends the chain when
+// the circle comes back. The Claude Code hook refuses a command that sets the
+// variable itself.
 const CHAIN_GUARD = (name) => [
-  `[ "$SDLC_HARNESS_CHAINED" = "${name}:$PPID" ] && exit 0`,
-  `SDLC_HARNESS_CHAINED="${name}:$PPID"; export SDLC_HARNESS_CHAINED`,
+  `case ":$SDLC_HARNESS_CHAINED:" in *":${name}:"*) exit 0 ;; esac`,
+  `SDLC_HARNESS_CHAINED="$SDLC_HARNESS_CHAINED:${name}"; export SDLC_HARNESS_CHAINED`,
 ];
 
 function chainShim(dir, name) {
