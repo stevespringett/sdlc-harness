@@ -2,5 +2,5 @@
   "name": "sdlc-harness",
   "version": "0.1.0",
   "description": "GitHub Issues-first, trunk-based SDLC: /ticket, /spec, /build, /ship, approver-only approval and acceptance, and git's pre-push judge.",
-  "license": "UNLICENSED"
+  "license": "Apache-2.0"
 }

@@ -11,7 +11,7 @@ How a team works with Claude Code, in a form Claude Code can execute: a plugin w
 | What a repo declares about itself | [schema/sdlc.schema.json](schema/sdlc.schema.json) |
 | The skills and hooks | [plugins/sdlc-harness/](plugins/sdlc-harness/) |
 
-Setting up a new client takes about 30 minutes, in six steps.
+Setup is six steps.
 
 ## 1. Accounts
 
@@ -33,10 +33,10 @@ The harness tells people apart by GitHub account, so set these up first.
 
 ## 2. Install the plugin
 
-Host this repo where the client's machines can read it (a private repo in the client's GitHub org is usual), then add it as a marketplace and install the plugin:
+Add this repo as a marketplace and install the plugin. To change the process for your team, fork it and use your fork's `owner/name` in place of `stevespringett/sdlc-harness` below.
 
 ```bash
-claude plugin marketplace add your-org/sdlc-harness
+claude plugin marketplace add stevespringett/sdlc-harness
 ```
 
 ```bash
@@ -50,7 +50,7 @@ So that every machine gets it, each repo can carry a `.claude/settings.json`:
 ```json
 {
   "extraKnownMarketplaces": {
-    "sdlc-harness": { "source": { "source": "github", "repo": "your-org/sdlc-harness" } }
+    "sdlc-harness": { "source": { "source": "github", "repo": "stevespringett/sdlc-harness" } }
   },
   "enabledPlugins": { "sdlc-harness@sdlc-harness": true }
 }
@@ -82,7 +82,7 @@ Copy [schema/sdlc.example.json](schema/sdlc.example.json) to `.sdlc-harness/sdlc
 | `issuePrefix` | How commits name an issue. Default `GH`, so `GH-12`, which GitHub links to issue 12 |
 | `modelLine`, `adhdStyle`, `subagentModel`, `policyStart`, `watch`, `watchInterval` | Optional; see the schema |
 
-A single-repo client sets `area` and `defaultArea` to the same name and leaves `tracker.repo` out. A multi-repo client points every repo at one tracker repo and gives each its own `area`.
+A single-repo team sets `area` and `defaultArea` to the same name and leaves `tracker.repo` out. A multi-repo team points every repo at one tracker repo and gives each its own `area`.
 
 The first Claude Code session in the repo installs git's pre-push judge (decision 0005). From then on, a push needs a green record from `verify.mjs` for the exact tree it sends.
 
@@ -124,13 +124,29 @@ The approval, the go, and the acceptance count only from an approver's own accou
 
 ## 6. Change the process
 
-Edit `SDLC.md`, `RULES.md`, or `PRINCIPLES.md`, or add a decision under `decisions/`. Bump the version in `plugins/sdlc-harness/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json` (both entries), run the tests, and push. Machines pick it up on their next `claude plugin update`.
+Edit `SDLC.md`, `RULES.md`, or `PRINCIPLES.md`, or add a decision under `decisions/`, and add a line under `## Unreleased` in `CHANGELOG.md`. Run the tests and push. Machines pick it up on their next `claude plugin update` after a release.
 
 ```bash
 npm test
 ```
 
-The tests (`node --test`, no dependencies) cover the push judge, the install, the deny-list, the policy (intake, approval, ownership, in-flight), the GitHub helper against a fake `gh`, the watch lock, and the session-start output size.
+The tests (`node --test`, no dependencies) cover the push judge, the install, the deny-list, the policy (intake, approval, ownership, in-flight), the GitHub helper against a fake `gh`, the watch lock, the session-start output size, and that every version field agrees.
+
+**Release.** The version is written only in `package.json`, `plugin.json`, and `marketplace.json`, never in Markdown. One command keeps them in sync, from a clean default branch with notes under `## Unreleased`:
+
+```bash
+node scripts/release.mjs <x.y.z> --dry-run
+```
+
+```bash
+node scripts/release.mjs <x.y.z>
+```
+
+It sets every version field, dates the `## Unreleased` section, commits, and tags `v<x.y.z>`. It never pushes. Push the branch and the tag, and the release workflow checks the versions, runs the tests, and publishes the GitHub Release with that section as its notes:
+
+```bash
+git push origin main v<x.y.z>
+```
 
 ## Removing it
 
@@ -141,3 +157,7 @@ node ~/Development/sdlc-harness/plugins/sdlc-harness/hooks/uninstall-hooks.mjs
 ```
 
 **Another tool that sets the global `core.hooksPath`.** The judge installs itself in front of whatever hooks path was there before and chains to it. If another tool does the same and records this one as its previous path, the chain would circle; the harness ends such a chain after one pass. Prefer one such tool per machine.
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).

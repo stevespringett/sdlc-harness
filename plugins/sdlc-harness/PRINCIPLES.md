@@ -1,6 +1,6 @@
 # Build principles
 
-How code is built in every repo on the SDLC (decision 0006). Edit this file to fit the client; keep one line per principle. A repo's `CLAUDE.md` may narrow a principle with a named exception and its reason, never contradict it. Where `RULES.md` speaks, it wins.
+How code is built in every repo on the SDLC (decision 0006). Edit this file to fit your team; keep one line per principle. A repo's `CLAUDE.md` may narrow a principle with a named exception and its reason, never contradict it. Where `RULES.md` speaks, it wins.
 
 ## Design
 

@@ -1,7 +1,7 @@
 {
   "name": "sdlc-harness",
   "owner": {
-    "name": "SDLC Harness"
+    "name": "Steve Springett"
   },
   "metadata": {
     "description": "A Claude Code SDLC harness: the skills and hooks that make every repo work the same way, with GitHub Issues as the tracker.",

@@ -1,0 +1,31 @@
+# Runs the same check verify.mjs runs before a push: the testCommand in
+# .sdlc-harness/sdlc.json (syntax, JSON, and the node --test suite). The tests
+# are hermetic (temp HOME, own git identity, system config off), so a bare
+# runner needs nothing installed beyond Node and git.
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [20, 22, 24]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Run the repo's testCommand
+        run: node -e "process.stdout.write(require('./.sdlc-harness/sdlc.json').testCommand)" > "$RUNNER_TEMP/test.sh" && sh "$RUNNER_TEMP/test.sh"
