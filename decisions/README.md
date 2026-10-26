@@ -2,7 +2,7 @@
 
 One file per decision, numbered, never deleted. Supersede instead of editing. Same format as a repo ADR, capped at 400 words: Context, Decision, Consequences. Alternatives only when a rejected option keeps coming back.
 
-Write one only when the decision applies to more than one repo or to how we work. Decisions about a single system live in that system's `docs/adr/`. A team adopting the harness keeps these, and adds its own from 0010.
+Write one only when the decision applies to more than one repo or to how we work. Decisions about a single system live in that system's `docs/adr/`. A team adopting the harness keeps these, and numbers its own from 1000, so new decisions here never collide with them.
 
 | # | Title | Status |
 |---|---|---|
@@ -15,3 +15,5 @@ Write one only when the decision applies to more than one repo or to how we work
 | [0007](0007-areas-own-issues-and-the-in-flight-limit.md) | Work areas own issues; the in-flight limit counts per area | Accepted |
 | [0008](0008-session-start-fits-the-hook-output-cap.md) | Session-start text is split to fit Claude Code's hook-output cap | Accepted |
 | [0009](0009-estimates-are-t-shirt-sizes.md) | Estimates are t-shirt sizes, never units of time | Accepted |
+| [0010](0010-issue-trackers-sit-behind-one-adapter.md) | Issue trackers sit behind one adapter | Accepted; rule 2 refined by 0011 |
+| [0011](0011-linear-through-its-mcp-connector.md) | Linear is reached through its MCP connector, as the agent's own member | Accepted |

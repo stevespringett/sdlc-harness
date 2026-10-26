@@ -17,6 +17,17 @@ import {
   threadOwner,
   whoami,
   fetchAssigned,
+  adapterFor,
+  areaLabels,
+  assign,
+  comment,
+  create,
+  label,
+  parseCommand,
+  parseId,
+  run,
+  search,
+  setTitle,
 } from '../tracker.mjs';
 import { labelCommands, labelSet } from '../setup-labels.mjs';
 import { checkIssue } from '../policy.mjs';
@@ -358,5 +369,113 @@ describe('label setup', () => {
       assert.equal(args[args.indexOf('--repo') + 1], 'acme/tracker');
       assert.ok(args.includes('--force'));
     }
+  });
+});
+
+describe('the adapter seam (decision 0010)', () => {
+  test('github is the default kind, and an unknown kind is a config problem the helper refuses', () => {
+    assert.equal(CFG.tracker.kind, 'github');
+    assert.equal(adapterFor(CFG).kind, 'github');
+    const odd = normalizeConfig({ ...RAW, tracker: { repo: 'acme/tracker', kind: 'trello' } });
+    assert.ok(odd.problems.some((p) => p.includes('tracker.kind "trello"')));
+    assert.throws(() => adapterFor(odd), /has no adapter/);
+  });
+
+  test('an id is 12, #12, or the prefix form, and nothing else', () => {
+    assert.equal(parseId('12', CFG), 12);
+    assert.equal(parseId('#12', CFG), 12);
+    assert.equal(parseId('GH-12', CFG), 12);
+    assert.equal(parseId('gh-12', CFG), 12);
+    for (const bad of ['', 'ENG-12', '12a', '0', '-3', 'GH-']) assert.throws(() => parseId(bad, CFG), /not an issue id/, bad);
+  });
+
+  test('the command line splits comma lists and refuses an unknown option', () => {
+    assert.deepEqual(parseCommand(['label', 'GH-3', '--add', 'Defect,area:web', '--remove', 'Feature']).opts.add, ['Defect', 'area:web']);
+    assert.equal(parseCommand(['comment', '3', 'f.md', '--edit-last']).opts.editLast, true);
+    assert.deepEqual(parseCommand(['create', '--title', 'T', '--body-file', 'b', '--label', 'a', '--label', 'b,c']).opts.labels, ['a', 'b', 'c']);
+    assert.throws(() => parseCommand(['issue', '3', '--close']));
+  });
+
+  test('run hands the parsed id to the adapter, and an unknown command gets the usage', () => {
+    const seen = [];
+    const fake = { parseId, title: (cfg, n, text) => (seen.push([n, text]), { n }) };
+    run(CFG, parseCommand(['title', 'GH-7', 'Dates', 'parse']), fake);
+    assert.deepEqual(seen, [[7, 'Dates parse']]);
+    assert.throws(() => run(CFG, parseCommand(['close', '7']), fake), /usage/);
+  });
+});
+
+describe('writes', () => {
+  const agent = [(a) => a[0] === 'api' && a[1] === 'user', () => ok(JSON.stringify({ login: 'acme-bot', id: 303 }))];
+  const approver = [(a) => a[0] === 'api' && a[1] === 'user', () => ok(JSON.stringify({ login: 'octo-lead', id: 101 }))];
+  const edits = (calls) => calls.filter((a) => a[0] === 'issue');
+
+  test('every write refuses an account that is not the agent, before it writes', () => {
+    const { gh, calls } = fakeGh([approver]);
+    assert.throws(() => comment(CFG, 12, 'f.md', { gh }), /no write: gh is logged in as an approver/);
+    assert.throws(() => label(CFG, 12, { add: ['Defect'], gh }), /no write/);
+    assert.throws(() => assign(CFG, 12, { add: ['octo-lead'], gh }), /no write/);
+    assert.throws(() => setTitle(CFG, 12, 'T', { gh }), /no write/);
+    assert.throws(() => create(CFG, { title: 'T', bodyFile: 'f.md', gh }), /no write/);
+    assert.deepEqual(edits(calls), []);
+  });
+
+  test('a comment posts with the body file; --edit-last edits the agent\'s latest', () => {
+    const { gh, calls } = fakeGh([agent, [(a) => a[0] === 'issue', () => ok('https://github.com/acme/tracker/issues/12#issuecomment-1\n')]]);
+    assert.equal(comment(CFG, 12, 'f.md', { gh }).url, 'https://github.com/acme/tracker/issues/12#issuecomment-1');
+    assert.deepEqual(edits(calls)[0], ['issue', 'comment', '12', '--repo', 'acme/tracker', '--body-file', 'f.md']);
+  });
+
+  test('--edit-last refuses a Spec an approver approved, and allows one not yet approved', () => {
+    const spec = c(user('acme-bot', 303), '## Spec\n- [ ] x', '2026-10-01T10:00:00Z');
+    const yes = c(user('octo-lead', 101), 'approved', '2026-10-01T11:00:00Z');
+    const issueRoute = (comments) => [isQuery('issue(number'), () => ok({ data: { repository: { issue: issueNode({ comments }) } } })];
+    const approved = fakeGh([agent, issueRoute([spec, yes])]);
+    assert.throws(() => comment(CFG, 12, 'f.md', { editLast: true, gh: approved.gh }), /approved; post a new Spec comment/);
+    assert.deepEqual(edits(approved.calls), []);
+    const pending = fakeGh([agent, issueRoute([spec]), [(a) => a[0] === 'issue', () => ok('u')]]);
+    comment(CFG, 12, 'f.md', { editLast: true, gh: pending.gh });
+    assert.ok(edits(pending.calls)[0].includes('--edit-last'));
+    const none = fakeGh([agent, issueRoute([yes])]);
+    assert.throws(() => comment(CFG, 12, 'f.md', { editLast: true, gh: none.gh }), /no comment by the agent/);
+  });
+
+  test('labels: status labels are refused, the rest pass as one edit', () => {
+    const { gh, calls } = fakeGh([agent, [(a) => a[0] === 'issue', () => ok('')]]);
+    assert.throws(() => label(CFG, 12, { add: ['status:in-review'], gh }), /move only through `state`/);
+    assert.throws(() => label(CFG, 12, { gh }), /--add or --remove/);
+    label(CFG, 12, { add: ['agent-needs-go'], remove: ['agent-fully-autonomous'], gh });
+    assert.deepEqual(edits(calls), [['issue', 'edit', '12', '--repo', 'acme/tracker', '--add-label', 'agent-needs-go', '--remove-label', 'agent-fully-autonomous']]);
+  });
+
+  test('assign strips @ and passes both lists', () => {
+    const { gh, calls } = fakeGh([agent, [(a) => a[0] === 'issue', () => ok('')]]);
+    assign(CFG, 12, { add: ['@octo-lead'], remove: ['acme-bot'], gh });
+    assert.deepEqual(edits(calls), [['issue', 'edit', '12', '--repo', 'acme/tracker', '--add-assignee', 'octo-lead', '--remove-assignee', 'acme-bot']]);
+  });
+
+  test('a title is one line', () => {
+    const { gh } = fakeGh([agent, [(a) => a[0] === 'issue', () => ok('')]]);
+    assert.throws(() => setTitle(CFG, 12, 'a\nb', { gh }), /one line/);
+    assert.deepEqual(setTitle(CFG, 12, '  Dates parse  ', { gh }), { number: 12, title: 'Dates parse' });
+  });
+
+  test('create files in the tracker repo only when its owner is allowed, never with a status label', () => {
+    const { gh, calls } = fakeGh([agent, [(a) => a[0] === 'issue', () => ok('https://github.com/acme/tracker/issues/31\n')]]);
+    assert.deepEqual(create(CFG, { title: 'T', bodyFile: 'f.md', labels: ['Defect', 'area:web'], gh }), { number: 31, url: 'https://github.com/acme/tracker/issues/31' });
+    assert.deepEqual(edits(calls)[0], ['issue', 'create', '--repo', 'acme/tracker', '--title', 'T', '--body-file', 'f.md', '--label', 'Defect', '--label', 'area:web']);
+    assert.throws(() => create(CFG, { title: 'T', bodyFile: 'f.md', labels: ['status:in-progress'], gh }), /starts in Backlog/);
+    const outside = normalizeConfig({ ...RAW, tracker: { repo: 'other/tracker', allowedOwners: ['acme'] } });
+    assert.throws(() => create(outside, { title: 'T', bodyFile: 'f.md', gh }), /outside tracker.allowedOwners/);
+  });
+
+  test('search and labels are reads: no account check, and labels keep only the area prefix', () => {
+    const { gh, calls } = fakeGh([
+      [(a) => a[0] === 'issue' && a[1] === 'list', () => ok([{ number: 4, title: 'Dates', state: 'CLOSED' }])],
+      [(a) => a[0] === 'label', () => ok([{ name: 'area:web', description: 'The site' }, { name: 'Defect', description: '' }])],
+    ]);
+    assert.deepEqual(search(CFG, 'dates locale', { gh }), [{ number: 4, title: 'Dates', state: 'closed' }]);
+    assert.deepEqual(areaLabels(CFG, { gh }), [{ name: 'area:web', area: 'web', description: 'The site' }]);
+    assert.ok(!calls.some((a) => a[1] === 'user'));
   });
 });

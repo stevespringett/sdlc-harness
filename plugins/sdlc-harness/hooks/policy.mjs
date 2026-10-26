@@ -180,7 +180,10 @@ const loginOf = (author) => String((author && typeof author === 'object' ? autho
 
 /** Can approval be decided at all? Not when nobody approves, or the agent is an approver. */
 function approvalUsable(cfg) {
-  return cfg.approvers.length > 0 && Boolean(cfg.agent) && !cfg.approvers.some((a) => a.login === cfg.agent.login);
+  if (!cfg.approvers.length || !cfg.agent) return false;
+  // On Linear a person is a UUID (decision 0011): a display name alone never identifies anyone.
+  if (cfg.tracker && cfg.tracker.kind === 'linear' && [cfg.agent, ...cfg.approvers].some((p) => typeof p.id !== 'string')) return false;
+  return !cfg.approvers.some((a) => a.login === cfg.agent.login || (a.id !== null && a.id === cfg.agent.id));
 }
 
 /**
@@ -338,8 +341,10 @@ export function checkIssue(issue, cfg) {
   // so a refused issue never stays in the agent's queue.
   const humans = [...cfg.approvers, ...cfg.people];
   const creatorIsHuman = humans.some((h) => isPerson(issue.author, h)) && !isAgent(issue.author, cfg);
-  const firstApprover = cfg.approvers[0] ? cfg.approvers[0].login : null;
-  const handBack = creatorIsHuman ? loginOf(issue.author) : firstApprover;
+  // Linear assigns by UUID; GitHub by login.
+  const handle = (p) => (cfg.tracker && cfg.tracker.kind === 'linear' && p && typeof p === 'object' && p.id ? String(p.id) : loginOf(p));
+  const firstApprover = cfg.approvers[0] ? handle(cfg.approvers[0]) : null;
+  const handBack = creatorIsHuman ? handle(issue.author) : firstApprover;
   const assignTo = blocked || parent ? handBack : null;
 
   return {

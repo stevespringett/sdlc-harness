@@ -145,8 +145,8 @@ describe('together, the outputs carry everything', () => {
   test('the repo output carries the watch text, the protected paths, the helpers, and the config\'s people', () => {
     const repo = outputs(world()).find((o) => o.includes('<sdlc-harness-repo'));
     assert.match(repo, /Protected paths for this repo: services\/area-0\/migrations\//);
-    assert.match(repo, /Intake and approval checks: node ".+\/policy\.mjs" check/);
-    assert.match(repo, /GitHub helper: node ".+\/tracker\.mjs"/);
+    assert.match(repo, /Intake and approval checks: tracker: issue <n> > <file>, then node ".+\/policy\.mjs" check/);
+    assert.match(repo, /Tracker: GitHub Issues in .+ means `node ".+\/tracker\.mjs" <op> \.\.\.`/);
     assert.match(repo, /Approvers: @octo-lead, @second-lead, @third-lead\. Agent account: @acme-delivery-bot\./);
     assert.match(repo, /Commits name GH-<issue number>/);
     assert.match(repo, /ADHD style/);

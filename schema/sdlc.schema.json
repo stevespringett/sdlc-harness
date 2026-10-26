@@ -16,6 +16,16 @@
             "login": { "type": "string", "pattern": "^[A-Za-z0-9-]+(\\[bot\\])?$" },
             "id": { "type": "integer", "minimum": 1, "description": "The account's numeric id (gh api users/<login> --jq .id). When given, both must match: a login can be renamed and taken by someone else; the id cannot." }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["login", "id"],
+          "description": "A Linear member (tracker.kind \"linear\"). It matches by its UUID alone.",
+          "properties": {
+            "login": { "type": "string", "minLength": 1, "description": "The member's Linear display name, for text and assignment." },
+            "id": { "type": "string", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", "description": "The member's Linear UUID, from get_user." }
+          }
         }
       ]
     },
@@ -60,7 +70,7 @@
       "minItems": 1,
       "description": "The only accounts whose comments approve an issue for work, give a push go, or accept it. Never the agent account."
     },
-    "agent": { "$ref": "#/definitions/person", "description": "The GitHub account the agent writes through (a machine user or bot). Its `## Spec` comments are the Spec; its comments never approve." },
+    "agent": { "$ref": "#/definitions/person", "description": "The account the agent writes through: a GitHub account, or a Linear member with tracker.kind \"linear\" (a machine user or bot). Its `## Spec` comments are the Spec; its comments never approve." },
     "people": {
       "type": "array",
       "items": { "$ref": "#/definitions/person" },
@@ -71,6 +81,20 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "kind": { "type": "string", "enum": ["github", "linear"], "default": "github", "description": "Where issues live (decisions 0010 and 0011). github: GitHub Issues through gh. linear: a Linear team through the Linear MCP connector, logged in as the agent's own member." },
+        "team": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]{0,15}$", "description": "linear only, and required there: the team's key, such as ENG. Issue ids carry it (ENG-12), so it is also the issue prefix." },
+        "linearStates": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "linear only: the team's workflow state name for each status.",
+          "properties": {
+            "backlog": { "type": "string", "default": "Backlog" },
+            "notStarted": { "type": "string", "default": "Todo" },
+            "inProgress": { "type": "string", "default": "In Progress" },
+            "inReview": { "type": "string", "default": "In Review" },
+            "done": { "type": "string", "default": "Done" }
+          }
+        },
         "repo": { "type": "string", "pattern": "^[\\w.-]+/[\\w.-]+$", "description": "owner/name of the repo whose Issues hold the work. Default: the GitHub repo origin names." },
         "allowedOwners": { "type": "array", "items": { "type": "string" }, "description": "GitHub accounts or orgs the agent may file issues and pull requests in. Default: the tracker repo's owner." },
         "states": { "type": "string", "enum": ["labels", "project"], "default": "labels", "description": "Where status is kept: status labels on the issue, or a single-select field on a Projects (v2) board." },

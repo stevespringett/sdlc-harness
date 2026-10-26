@@ -59,7 +59,10 @@ export function greenKey(tree, testCommand) {
 
 /** The issue prefix commits name (GH-12), or null when the config's value is unusable. */
 export function issuePrefixOf(cfg) {
-  const p = cfg && cfg.issuePrefix !== undefined ? cfg.issuePrefix : DEFAULT_PREFIX;
+  const t = (cfg && cfg.tracker) || {};
+  // A Linear issue's id carries its team's key (ENG-12), so that key is the prefix.
+  const fallback = t.kind === 'linear' && typeof t.team === 'string' ? t.team : DEFAULT_PREFIX;
+  const p = cfg && cfg.issuePrefix !== undefined ? cfg.issuePrefix : fallback;
   return typeof p === 'string' && /^[A-Za-z][A-Za-z0-9]{0,15}$/.test(p) ? p : null;
 }
 
@@ -88,9 +91,15 @@ export function secretsIn(line) {
 // "owner/repo#12", or the issue's URL, with or without a colon. The config's
 // own prefix form ("Fixes GH-12") is refused too, so a message never relies
 // on GitHub ignoring it; another word with a number ("Fix utf-8") is not.
-const closingRe = (prefix) =>
+// Linear closes an issue on more words (decision 0011): every form of close,
+// fix, resolve, complete, and implement, -ing forms too, before its id
+// ("Completes ENG-12"). Those are refused before the prefix form when the
+// tracker is Linear.
+const GITHUB_WORDS = 'close[sd]?|fix(?:e[sd])?|resolve[sd]?';
+const LINEAR_WORDS = 'clos(?:e[sd]?|ing)|fix(?:e[sd]|ing)?|resol(?:ve[sd]?|ving)|complet(?:e[sd]?|ing)|implement(?:s|ed|ing)?';
+const closingRe = (prefix, kind) =>
   new RegExp(
-    `\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)(?: ?: ?| )(?:(?:[\\w.-]{1,100}\\/[\\w.-]{1,100})?#\\d+|https?:\\/\\/\\S{1,200}\\/issues\\/\\d+|${prefix}-\\d+\\b)`,
+    `\\b(?:(?:${GITHUB_WORDS})(?: ?: ?| )(?:(?:[\\w.-]{1,100}\\/[\\w.-]{1,100})?#\\d+|https?:\\/\\/\\S{1,200}\\/issues\\/\\d+)|(?:${kind === 'linear' ? LINEAR_WORDS : GITHUB_WORDS})(?: ?: ?| )${prefix}-\\d+\\b)`,
     'i',
   );
 
@@ -98,9 +107,9 @@ const closingRe = (prefix) =>
  * The closing phrase a line of text carries, or null. Runs of spaces and tabs
  * collapse to one first, so no input makes the match backtrack.
  */
-export function closingKeyword(line, prefix = DEFAULT_PREFIX) {
+export function closingKeyword(line, prefix = DEFAULT_PREFIX, kind = 'github') {
   const p = /^[A-Za-z][A-Za-z0-9]{0,15}$/.test(String(prefix)) ? prefix : DEFAULT_PREFIX;
-  const m = closingRe(p).exec(String(line || '').replace(/[ \t]+/g, ' '));
+  const m = closingRe(p, kind).exec(String(line || '').replace(/[ \t]+/g, ' '));
   return m ? m[0] : null;
 }
 
@@ -218,6 +227,7 @@ function loadConfigAt(cwd, commit) {
     testCommand: cfg.testCommand || '',
     protectedPaths: [...(cfg.protectedPaths || []), `${CONFIG_DIR}/`],
     issuePrefix: prefix,
+    trackerKind: cfg.tracker && cfg.tracker.kind === 'linear' ? 'linear' : 'github',
     requireGreen: cfg.requireGreen !== false,
   };
 }
@@ -390,7 +400,7 @@ function judgeLine(cwd, remoteUrl, line, state) {
   const closing = [];
   commits.forEach((c, i) => {
     for (const l of messages[i].split('\n')) {
-      const k = closingKeyword(l, cfg.issuePrefix);
+      const k = closingKeyword(l, cfg.issuePrefix, cfg.trackerKind);
       if (k) closing.push(`  ${c.slice(0, 12)}: "${k}"`);
     }
   });

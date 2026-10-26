@@ -5,6 +5,10 @@
 // labels), and one area label per area the config lists. A person runs it once
 // per tracker repo, and again after adding an area. It never deletes a label.
 //
+// A Linear team (decision 0011) keeps status in its workflow states, so it
+// gets no status labels, and the labels are made with the Linear MCP tools:
+// this prints them, with the call that makes each, for a session to run.
+//
 // Usage: node setup-labels.mjs [--dry-run]    (inside a repo with .sdlc-harness/sdlc.json)
 
 import { realpathSync } from 'node:fs';
@@ -24,7 +28,7 @@ export function labelSet(cfg) {
     { name: 'Discovered', color: 'c5def5', description: 'Found during a build, outside its ticket, and blocking it' },
     { name: 'human-architected', color: '5319e7', description: 'The body is the design; counts only when an approver applied it' },
   ];
-  if (cfg.tracker.states === 'labels') {
+  if (cfg.tracker.kind === 'github' && cfg.tracker.states === 'labels') {
     const s = cfg.tracker.statusLabels;
     labels.push(
       { name: s.notStarted, color: 'ededed', description: 'Status: Not Started (never an approval)' },
@@ -34,6 +38,11 @@ export function labelSet(cfg) {
   }
   for (const a of cfg.areas) labels.push({ name: `${cfg.areaLabelPrefix}${a}`, color: 'bfd4f2', description: `Work area ${a}: the repo whose config names this area owns the issue` });
   return labels;
+}
+
+/** The Linear MCP calls that create each label in the team, for a session to make. */
+export function linearLabelCalls(cfg) {
+  return labelSet(cfg).map((l) => ({ tool: 'create_issue_label', name: l.name, color: `#${l.color}`, description: l.description, team: cfg.tracker.team }));
 }
 
 /** The gh commands that create or update each label. */
@@ -46,6 +55,19 @@ function main() {
   const cfg = root && loadConfig(root);
   if (!cfg) {
     console.error('[setup-labels] no .sdlc-harness/sdlc.json in this repo');
+    return 1;
+  }
+  if (cfg.tracker.kind === 'linear') {
+    if (!cfg.tracker.team) {
+      console.error('[setup-labels] tracker.team is not set');
+      return 1;
+    }
+    console.log(`Linear team ${cfg.tracker.team}: in a Claude Code session in this repo, ask it to list the team's labels (list_issue_labels team "${cfg.tracker.team}") and create each one below that is missing, with create_issue_label and the team's id from get_user "me". Never rename or delete one.`);
+    console.log(JSON.stringify(linearLabelCalls(cfg), null, 2));
+    return 0;
+  }
+  if (cfg.tracker.kind !== 'github') {
+    console.error(`[setup-labels] creates GitHub labels, and tracker.kind is "${cfg.tracker.kind}"`);
     return 1;
   }
   if (!cfg.tracker.repo) {

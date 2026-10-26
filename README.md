@@ -1,6 +1,6 @@
 # SDLC harness
 
-How a team works with Claude Code, in a form Claude Code can execute: a plugin with four skills (`/ticket`, `/spec`, `/build`, `/ship`), the hooks that enforce the gates, and the handbook that explains them. GitHub Issues is the tracker. No dependencies beyond Node 20+, git, and the `gh` CLI.
+How a team works with Claude Code, in a form Claude Code can execute: a plugin with four skills (`/ticket`, `/spec`, `/build`, `/ship`), the hooks that enforce the gates, and the handbook that explains them. The tracker is GitHub Issues by default, or a Linear team (see [Using Linear](#using-linear-instead-of-github-issues)). No dependencies beyond Node 20+, git, and the `gh` CLI.
 
 | You want | Read |
 |---|---|
@@ -72,6 +72,7 @@ Copy [schema/sdlc.example.json](schema/sdlc.example.json) to `.sdlc-harness/sdlc
 | `approvers` | `[{ "login": "...", "id": 123 }]`: the only accounts that approve and accept |
 | `agent` | `{ "login": "...", "id": 456 }`: the account Claude Code writes through |
 | `people` | Other people who file issues; a refused issue goes back to them |
+| `tracker.kind` | Where issues live: `github` (default) or `linear` (decisions 0010, 0011) |
 | `tracker.repo` | `owner/name` of the repo whose Issues hold the work. Default: this repo's origin |
 | `tracker.allowedOwners` | Orgs or users the agent may file issues and PRs in. Default: the tracker's owner |
 | `tracker.states` | `labels` (default) or `project` (see step 4) |
@@ -109,6 +110,19 @@ node ~/Development/sdlc-harness/plugins/sdlc-harness/hooks/setup-labels.mjs
 
 **Recommended:** turn on branch protection with required status checks on the default branch. The pre-push judge stops mistakes; only the server stops a determined bypass.
 
+## Using Linear instead of GitHub Issues
+
+The skills, rules, and gates are the same. The session reaches Linear through the Linear MCP connector, so no API key is needed (decision 0011).
+
+1. **The agent's Linear member.** Invite a member for the agent (such as `claude`) to the workspace and the team. It must not be an approver.
+2. **Connect the Linear connector as that member** on every machine that runs Claude Code. In a session, ask Claude to run Linear's `get_user` with `me`: it must name the agent member.
+3. **Look up each UUID.** Ask Claude to run `get_user` for the agent and for each approver. The config names people as `{ "login": "<display name>", "id": "<UUID>" }`, and matches them by UUID alone.
+4. **The config.** Start from [schema/sdlc.linear.example.json](schema/sdlc.linear.example.json): `tracker.kind` is `linear` and `tracker.team` is the team key, such as `ENG`. Commits name issues `ENG-12`. If the team's workflow states are not named Backlog, Todo, In Progress, In Review, and Done, set `tracker.linearStates`. A team with no In Review state needs one, so finished work waits for acceptance.
+5. **The labels.** Run `node <checkout>/plugins/sdlc-harness/hooks/setup-labels.mjs` in the repo. For Linear it prints the labels as a list, without status labels, since Linear keeps status in workflow states. Ask Claude to create the missing ones with the Linear tools.
+6. **Linear's Git automations.** In the team's settings, under Workflow, set the "On merge" automation to In Review or to no change. Otherwise Linear moves an issue to Done when a commit or pull request that names it merges, and only an approver accepts.
+
+The Claude Code hook allows only the Linear writes the SDLC makes: comments, issues, notifications, labels, and attachments. It refuses any `save_issue` that sets Done or Canceled, marks a duplicate, or files or moves an issue outside the team. The push judge refuses Linear's closing words (`Fixes`, `Closes`, `Resolves`, `Completes`, `Implements`, and their other forms) before an `ENG-12`.
+
 ## 5. Use the four skills
 
 | Skill | What it does | Then a person |
@@ -130,7 +144,7 @@ Edit `SDLC.md`, `RULES.md`, or `PRINCIPLES.md`, or add a decision under `decisio
 npm test
 ```
 
-The tests (`node --test`, no dependencies) cover the push judge, the install, the deny-list, the policy (intake, approval, ownership, in-flight), the GitHub helper against a fake `gh`, the watch lock, the session-start output size, and that every version field agrees.
+The tests (`node --test`, no dependencies) cover the push judge, the install, the deny-list, the policy (intake, approval, ownership, in-flight), the tracker helper and its GitHub adapter against a fake `gh`, the Linear adapter and hook guard against saved Linear MCP output, the watch lock, the session-start output size, and that every version field agrees.
 
 **Release.** The version is written only in `package.json`, `plugin.json`, and `marketplace.json`, never in Markdown. One command keeps them in sync, from a clean default branch with notes under `## Unreleased`:
 

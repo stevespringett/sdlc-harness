@@ -60,7 +60,7 @@
         ]
       },
       {
-        "matcher": "mcp__.*github.*",
+        "matcher": "mcp__.*([Gg]ithub|[Ll]inear).*",
         "hooks": [
           {
             "type": "command",

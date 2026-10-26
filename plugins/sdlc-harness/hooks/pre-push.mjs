@@ -20,7 +20,11 @@
 //   - gh issue close, delete, and transfer: only an approver closes an issue;
 //   - gh pr create or edit whose title or body carries a closing keyword
 //     ("Fixes #12"), which would close the issue when the pull request merges;
-//   - gh issue or pr create with --repo outside the config's allowed owners.
+//   - gh issue or pr create with --repo outside the config's allowed owners;
+//   - with a Linear tracker (decision 0011), a Linear MCP write other than a
+//     comment, an issue, a notification, a label, or an attachment, and a
+//     save_issue that sets Done or Canceled, marks a duplicate, or files or
+//     moves an issue outside the configured team.
 // It reads the words each command runs, after the shell's quote removal, so a
 // grep or a path that only mentions these runs untouched. A command it cannot
 // read runs: git's hook still judges any push in it, and refuses a closing
@@ -271,6 +275,11 @@ const prefixHere = () => {
   return (hc && hc.cfg && hc.cfg.issuePrefix) || 'GH';
 };
 
+const kindHere = () => {
+  const hc = hookConfig();
+  return (hc && hc.cfg && hc.cfg.tracker && hc.cfg.tracker.kind) || 'github';
+};
+
 // Text the shell builds ("$(cat body.md)", "$BODY", backticks) is not what
 // the hook reads, so a title or body that carries it is refused.
 const SHELL_BUILT = /[$`]/;
@@ -293,9 +302,10 @@ function issueVerdict(sub, sub2, rest, ghRepo) {
       texts.push(readFileSync(p, 'utf8'));
     }
     const prefix = prefixHere();
+    const kind = kindHere();
     for (const t of texts) {
       for (const line of String(t).split('\n')) {
-        const k = closingKeyword(line, prefix);
+        const k = closingKeyword(line, prefix, kind);
         if (k) return `gh pr ${sub2} with "${k}" would close the issue when the pull request merges, and only an approver closes an issue`;
       }
     }
@@ -476,6 +486,34 @@ function bashVerdict(command) {
 // GitHub MCP tools that only read.
 const MCP_READ = /^(get|list|search|read|fetch|download|authenticate|complete_authentication)/;
 
+// Linear MCP tools a session on a Linear tracker may write with (decision 0011):
+// comments, issues, notifications, labels for setup, and attachments for evidence.
+// Every other Linear write (deletes, projects, initiatives, documents, merges) is refused.
+const LINEAR_READ = /^(get|list|search|extract|fetch|download|query|guide|authenticate|complete_authentication)/;
+const LINEAR_WRITES = new Set(['save_comment', 'save_issue', 'mark_notification', 'create_issue_label', 'save_issue_label', 'prepare_attachment_upload', 'prepare_file_upload', 'create_attachment', 'create_attachment_from_upload']);
+// State types a save_issue may name: never completed or canceled.
+const LINEAR_OPEN_TYPES = ['backlog', 'unstarted', 'started'];
+
+/** Why a Linear MCP call is refused in a repo whose tracker is Linear, or null. */
+export function linearVerdict(tool, ti, cfg) {
+  const action = tool.split('__').pop();
+  if (LINEAR_READ.test(action)) return null;
+  if (!LINEAR_WRITES.has(action)) return `${tool} is not one of the Linear writes the SDLC makes (comments, issues, notifications, labels, attachments); a person makes that change`;
+  if (action !== 'save_issue') return null;
+  const t = cfg.tracker;
+  if (ti.state !== undefined && ti.state !== null) {
+    const names = ['backlog', 'notStarted', 'inProgress', 'inReview'].map((k) => String(t.linearStates[k]).toLowerCase());
+    const s = String(ti.state).trim().toLowerCase();
+    if (!names.includes(s) && !LINEAR_OPEN_TYPES.includes(s)) return `save_issue with state "${ti.state}": only an approver moves an issue to ${t.linearStates.done} or cancels it (decision 0003), and a state this hook cannot name is refused; use one of ${['backlog', 'notStarted', 'inProgress', 'inReview'].map((k) => `"${t.linearStates[k]}"`).join(', ')}`;
+  }
+  if (ti.duplicateOf !== undefined && ti.duplicateOf !== null) return 'save_issue with duplicateOf closes the issue as a duplicate, and only an approver closes an issue';
+  if (ti.delegate !== undefined && ti.delegate !== null) return 'save_issue with delegate hands the issue to another agent, which can close it; a person delegates';
+  if (ti.template !== undefined) return 'save_issue with template can set a state or sub-issues this hook cannot see; file the issue without one';
+  if (ti.id === undefined && String(ti.team || '').toLowerCase() !== String(t.team || '').toLowerCase()) return `save_issue creates an issue only in team ${t.team}, the tracker the config names (team "${ti.team || ''}" given)`;
+  if (ti.id !== undefined && ti.team !== undefined) return 'save_issue that moves an issue to another team takes it out of the tracker; a person moves it';
+  return null;
+}
+
 /** The reason to refuse a tool call, or null to let it run. */
 export function verdict(input) {
   const tool = String(input.tool_name || 'Bash');
@@ -488,9 +526,18 @@ export function verdict(input) {
     const p = ti.file_path || ti.notebook_path || '';
     return guardedPath(p) ? `${tool} ${p} changes the push judge or a repo's config` : null;
   }
+  if (/^mcp__.*linear/i.test(tool)) {
+    CWD = input.cwd || process.cwd();
+    const hc = hookConfig();
+    let v = null;
+    if (hc && hc.error) v = LINEAR_READ.test(tool.split('__').pop()) ? null : `${tool}: the repo's config cannot be read (${hc.error}), so a Linear write cannot be judged`;
+    else if (hc && hc.cfg.tracker.kind === 'linear') v = linearVerdict(tool, ti, hc.cfg);
+    // A tool whose name also says github still meets the GitHub rule below.
+    if (v || !/github/i.test(tool)) return v;
+  }
   if (/^mcp__.*github/i.test(tool)) {
     const action = tool.split('__').pop();
-    return MCP_READ.test(action) ? null : `${tool} writes to GitHub without git; issue comments, labels, and assignees go through the gh CLI, as the skills say`;
+    return MCP_READ.test(action) ? null : `${tool} writes to GitHub without git; issue comments, labels, and assignees go through the tracker helper, as the skills say`;
   }
   return null;
 }

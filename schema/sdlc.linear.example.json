@@ -1,0 +1,31 @@
+{
+  "$schema": "./sdlc.schema.json",
+  "integration": "trunk",
+  "defaultBranch": "main",
+  "testCommand": "npm test",
+  "protectedPaths": [
+    ".github/",
+    "package.json",
+    "package-lock.json"
+  ],
+  "e2eTriggerPaths": [],
+  "e2eCommand": "",
+  "browserVerify": false,
+  "requireGreen": true,
+  "approvers": [
+    { "login": "your-approver", "id": "00000000-0000-4000-8000-000000000001" }
+  ],
+  "agent": { "login": "your-agent", "id": "00000000-0000-4000-8000-000000000002" },
+  "people": [],
+  "tracker": {
+    "kind": "linear",
+    "team": "ENG"
+  },
+  "area": "app",
+  "areas": ["app"],
+  "defaultArea": "app",
+  "inFlightLimit": 5,
+  "watch": true,
+  "modelLine": true,
+  "adhdStyle": false
+}

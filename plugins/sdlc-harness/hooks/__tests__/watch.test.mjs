@@ -191,7 +191,8 @@ function sessionText(cfg) {
 test('session start names the area the watch serves, the inbox, and the owner check', () => {
   const out = sessionText({ ...GOOD, area: 'web' });
   assert.match(out, /GitHub watch for area "web" in acme\/tracker/);
-  assert.match(out, /tracker\.mjs" inbox` marks mine: true/);
+  assert.match(out, /`tracker: inbox` marks mine: true/);
+  assert.match(out, /means `node ".+\/tracker\.mjs" <op> \.\.\.`/);
   assert.match(out, /policy\.mjs" owner/);
   assert.match(out, /leave its notification unread/);
   assert.match(out, /never another area's/);

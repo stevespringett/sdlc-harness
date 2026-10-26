@@ -397,8 +397,8 @@ describe('GitHub MCP tools', () => {
   for (const name of ['mcp__github__get_file_contents', 'mcp__github__list_pull_requests', 'mcp__github__search_code', 'mcp__github__get_issue', 'mcp__plugin_engineering_github__authenticate', 'mcp__plugin_engineering_github__complete_authentication']) {
     test(`${name} runs`, () => assert.equal(run({ tool_name: name, tool_input: {} }).status, 0));
   }
-  test('a refused MCP write says to use the gh CLI', () => {
-    assert.match(run({ tool_name: 'mcp__github__add_issue_comment', tool_input: {} }).stderr, /gh CLI/);
+  test('a refused MCP write says to use the tracker helper', () => {
+    assert.match(run({ tool_name: 'mcp__github__add_issue_comment', tool_input: {} }).stderr, /tracker helper/);
   });
 });
 

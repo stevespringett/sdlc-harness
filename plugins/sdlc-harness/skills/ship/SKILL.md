@@ -8,11 +8,11 @@ argument-hint: "GH-n"
 
 Stage 4 of the SDLC. Precondition: the issue's worktree exists and every acceptance criterion is either met or deferred with an approver's OK on the issue.
 
-`<tracker>`, `<verify>`, and `<repo>` are the paths and tracker repo the repo block at session start prints; `<prefix>` is the issue prefix. Run every git and verify step in the checkout the issue was built in (`/build` step 4), with that checkout's config.
+`<verify>` is the path the repo block at session start prints; `tracker: <op>` is an operation on the issue tracker: the repo block at session start says how this repo's tracker does each one (a `tracker.mjs` command for GitHub, a Linear MCP call for Linear). `<prefix>` is the issue prefix. Run every git and verify step in the checkout the issue was built in (`/build` step 4), with that checkout's config.
 
 ## Steps
 
-1. **Check the account** (`node <tracker> whoami`, `ok: true` or stop) and read `.sdlc-harness/sdlc.json`.
+1. **Check the account** (`tracker: whoami`, `ok: true` or stop) and read `.sdlc-harness/sdlc.json`.
 2. **Clean tree.** `git status --porcelain`. Uncommitted changes → commit them or stop. Every commit names `<prefix>-<n>`; none carries `Closes`, `Fixes`, `Resolves`, or another closing keyword before an issue reference (reword any that does), so GitHub never closes the issue on its own.
 3. **Rebase** onto the latest default branch: `git fetch origin && git rebase origin/<defaultBranch>`. Conflicts are yours to resolve; re-run the tests after.
 4. **Verify** (the real gate): `node <verify> --quiet`. Red → fix, commit, verify again. Never weaken a test. Green writes the record git's pre-push judge checks; verify also installs the judge and records nothing until git is proven to run it.
@@ -24,9 +24,9 @@ Stage 4 of the SDLC. Precondition: the issue's worktree exists and every accepta
 6. **agent-needs-go check.** If the issue carries `agent-needs-go` or the diff touches a protected path, confirm the go is recorded (`ls "$(git rev-parse --git-common-dir)/sdlc-harness/go/<prefix>-<n>"`). Missing → stop and say what is waiting. The judge will refuse the push anyway.
 7. **Integrate.** Write any commit message or PR body to a file first.
    - `trunk`: `git push origin HEAD:<defaultBranch>`. Git runs the push judge on the exact commits sent. Then in the main checkout: `git pull --ff-only`.
-   - `github-flow`: `git push -u origin <branch>` and `gh pr create --title "<prefix>-<n>: <title>" --body-file <file>`. The body lists the acceptance criteria and names the issue as `Refs #<n>` (or `<repo>#<n>` from another repo), never with a closing keyword; the Claude Code hook refuses one. The agent never merges (`gh pr merge` is refused): `agent-fully-autonomous` may rely on auto-merge an approver turned on for the repo; `agent-needs-go` waits for an approver's merge.
+   - `github-flow`: `git push -u origin <branch>` and `gh pr create --title "<prefix>-<n>: <title>" --body-file <file>`. The body lists the acceptance criteria and names the issue as `Refs <prefix>-<n>` (on GitHub Issues, `Refs #<n>`, or `<repo>#<n>` from another repo), never with a closing keyword; the Claude Code hook refuses one. The agent never merges (`gh pr merge` is refused): `agent-fully-autonomous` may rely on auto-merge an approver turned on for the repo; `agent-needs-go` waits for an approver's merge.
 8. **On-demand e2e.** If any changed file matches `e2eTriggerPaths` and `e2eCommand` is set, run it after the push and note the run URL.
-9. **The issue.** `node <tracker> state <n> in-review`, then assign an approver and remove the agent (`gh issue edit <n> --repo <repo> --add-assignee <approver> --remove-assignee <agent>`): acceptance is theirs. Never close the issue and never set Done. Then post the closing comment with `gh issue comment <n> --repo <repo> --body-file <file>`:
+9. **The issue.** `tracker: state <n> in-review`, then assign an approver and remove the agent (`tracker: assign <n> --add <approver> --remove <agent>`): acceptance is theirs. Never close the issue and never set Done. Then post the closing comment with `tracker: comment <n> <file>`:
 
    ```
    **Shipped in `<sha>`** on <branch>.
@@ -48,5 +48,5 @@ Stage 4 of the SDLC. Precondition: the issue's worktree exists and every accepta
 - Write commit messages to a file and commit with `git commit -F <file>`: a message passed on the command line can trip the Claude Code hook's word reading.
 - Git's pre-push judge is the enforcement, this skill is the discipline (decision 0005). If it refuses the push, read its reason and do what it says; never pass `--no-verify`, never move `core.hooksPath`, and never edit the judge's files.
 - Never force-push. Never push a branch on a trunk repo.
-- A red nightly or a failed on-demand e2e caused by this push is fixed on this issue while it is open, In Review included: move it back to In Progress when the area has a free slot (`node <tracker> inflight`, the limit of `inFlightLimit`), fix, and ship again. Until a slot frees, it stays In Review, assigned to the agent, and each tick's report names it with the count. Once an approver has closed the issue, it is a Defect issue via `/ticket`, linked to this one.
+- A red nightly or a failed on-demand e2e caused by this push is fixed on this issue while it is open, In Review included: move it back to In Progress when the area has a free slot (`tracker: inflight`, the limit of `inFlightLimit`), fix, and ship again. Until a slot frees, it stays In Review, assigned to the agent, and each tick's report names it with the count. Once an approver has closed the issue, it is a Defect issue via `/ticket`, linked to this one.
 - Every mistake found in review that you have seen before in this repo becomes one line in that repo's `CLAUDE.md`, in the same push.

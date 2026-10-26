@@ -40,6 +40,11 @@ export function githubRepoOf(url) {
  * login can be renamed and later taken by someone else; the numeric id cannot.
  */
 export function person(p) {
+  // A Linear member: its UUID is the identity, and the login (its display name) is for text.
+  if (p && typeof p === 'object' && typeof p.id === 'string' && UUID.test(p.id)) {
+    const login = typeof p.login === 'string' && p.login.trim() ? p.login.trim().toLowerCase() : null;
+    return login ? { login, id: p.id.toLowerCase() } : null;
+  }
   if (typeof p === 'string' && /^[A-Za-z0-9-]+(?:\[bot\])?$/.test(p)) return { login: p.toLowerCase(), id: null };
   if (p && typeof p === 'object' && typeof p.login === 'string' && /^[A-Za-z0-9-]+(?:\[bot\])?$/.test(p.login)) {
     const id = Number.isInteger(p.id) && p.id > 0 ? p.id : null;
@@ -61,6 +66,8 @@ function people(list) {
  */
 export function isPerson(author, who) {
   if (!author || !who) return false;
+  // A Linear member matches by UUID alone: names change and repeat, the id does not.
+  if (typeof who.id === 'string') return typeof author === 'object' && String(author.id || '').toLowerCase() === who.id;
   const raw = typeof author === 'string' ? author : author.login;
   if (typeof raw !== 'string') return false;
   const type = typeof author === 'object' ? author.type : null;
@@ -71,6 +78,20 @@ export function isPerson(author, who) {
   if (who.id === null) return true;
   return typeof author === 'object' && Number(author.id) === who.id;
 }
+
+/** The tracker kinds with an adapter (decisions 0010 and 0011). */
+export const TRACKER_KINDS = ['github', 'linear'];
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Linear workflow state names for each status, by default the names a new Linear team starts with. */
+export const DEFAULT_LINEAR_STATES = {
+  backlog: 'Backlog',
+  notStarted: 'Todo',
+  inProgress: 'In Progress',
+  inReview: 'In Review',
+  done: 'Done',
+};
 
 export const DEFAULT_STATUS_LABELS = {
   notStarted: 'status:not-started',
@@ -97,13 +118,20 @@ export function normalizeConfig(cfg, { origin = null } = {}) {
   const prefix = issuePrefixOf(cfg);
   if (!prefix) problems.push('issuePrefix must be letters and digits, such as "GH"');
   const t = cfg.tracker || {};
-  const repo = typeof t.repo === 'string' && /^[\w.-]+\/[\w.-]+$/.test(t.repo) ? t.repo : origin;
-  if (!repo) problems.push('tracker.repo is not set and origin is not a GitHub repo');
+  const kind = t.kind === undefined ? 'github' : String(t.kind);
+  if (!TRACKER_KINDS.includes(kind)) problems.push(`tracker.kind "${kind}" is not one of ${TRACKER_KINDS.join(', ')}`);
+  const team = kind === 'linear' && typeof t.team === 'string' && /^[A-Za-z][A-Za-z0-9]{0,15}$/.test(t.team) ? t.team : null;
+  if (kind === 'linear' && !team) problems.push('tracker.kind is "linear" but tracker.team is not a team key such as "ENG"');
+  if (kind === 'linear' && team && prefix && prefix.toUpperCase() !== team.toUpperCase()) problems.push(`issuePrefix "${prefix}" is not the Linear team key "${team}", and a Linear issue id always carries its team key`);
+  const repo = kind !== 'github' ? null : typeof t.repo === 'string' && /^[\w.-]+\/[\w.-]+$/.test(t.repo) ? t.repo : origin;
+  if (kind === 'github' && !repo) problems.push('tracker.repo is not set and origin is not a GitHub repo');
   const approvers = people(cfg.approvers);
   const agent = person(cfg.agent);
-  if (!approvers.length) problems.push('approvers names no GitHub login, so nothing is ever approved');
-  if (!agent) problems.push('agent names no GitHub login, so no Spec is ever recognized');
-  if (agent && approvers.some((a) => a.login === agent.login)) problems.push(`the agent account ${agent.login} is also an approver, so its own comments could approve; nothing is approved until they differ`);
+  const who = kind === 'linear' ? 'Linear member (login and UUID id)' : 'GitHub login';
+  if (!approvers.length) problems.push(`approvers names no ${who}, so nothing is ever approved`);
+  if (!agent) problems.push(`agent names no ${who}, so no Spec is ever recognized`);
+  if (kind === 'linear' && [agent, ...approvers].some((p) => p && typeof p.id !== 'string')) problems.push('with tracker.kind "linear", the agent and every approver need the Linear member\'s UUID as id, from get_user');
+  if (agent && approvers.some((a) => a.login === agent.login || (a.id !== null && a.id === agent.id))) problems.push(`the agent account ${agent.login} is also an approver, so its own comments could approve; nothing is approved until they differ`);
   const states = t.states === 'project' ? 'project' : 'labels';
   const project = t.project && typeof t.project === 'object' ? t.project : null;
   if (states === 'project' && !(project && project.owner && Number.isInteger(project.number))) problems.push('tracker.states is "project" but tracker.project has no owner and number');
@@ -128,8 +156,11 @@ export function normalizeConfig(cfg, { origin = null } = {}) {
     agent,
     people: people(cfg.people),
     tracker: {
+      kind,
       repo,
-      allowedOwners: (Array.isArray(t.allowedOwners) && t.allowedOwners.length ? t.allowedOwners : repo ? [repo.split('/')[0]] : []).map((o) => String(o).toLowerCase()),
+      team,
+      linearStates: { ...DEFAULT_LINEAR_STATES, ...(t.linearStates || {}) },
+      allowedOwners: (Array.isArray(t.allowedOwners) && t.allowedOwners.length ? t.allowedOwners : repo ? [repo.split('/')[0]] : team ? [team] : []).map((o) => String(o).toLowerCase()),
       states,
       statusLabels: { ...DEFAULT_STATUS_LABELS, ...(t.statusLabels || {}) },
       project: project ? { field: 'Status', ...project, options: { ...DEFAULT_PROJECT_OPTIONS, ...(project.options || {}) } } : null,

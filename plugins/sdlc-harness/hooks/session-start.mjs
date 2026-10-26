@@ -110,11 +110,40 @@ export function renderPrinciples() {
   ].join('\n');
 }
 
+/**
+ * How this repo's tracker does each operation the skills and the watch name
+ * ("tracker: comment <n> <file>"), so the skills read the same for every kind
+ * (decisions 0010 and 0011).
+ */
+export function trackerText(cfg) {
+  const tracker = script('tracker.mjs');
+  const policy = script('policy.mjs');
+  const t = cfg.tracker;
+  if (t.kind !== 'linear') {
+    return [
+      `Tracker: GitHub Issues in ${t.repo || '(not configured)'}, status by ${t.states}. "tracker: <op> ..." in the skills and the watch means \`node "${tracker}" <op> ...\`, and every tracker read and write goes through it, never gh issue:`,
+      '  whoami | issue <id> > <file> | state <id> <status> | comment <id> <file> [--edit-last] | label <id> --add a --remove b | assign <id> --add login --remove login | title <id> <text> | create --title t --body-file f --label l | search <words> | labels | inflight | queue | inbox | read <thread> | sub <parent> <child>.',
+    ];
+  }
+  const s = t.linearStates;
+  return [
+    `Tracker: Linear team ${t.team}, through the Linear MCP connector logged in as the agent's own member (decision 0011). Load its tools with ToolSearch before the first one: get_user, get_issue, list_comments, list_issues, list_issue_labels, save_comment, save_issue, get_notifications, mark_notification. If they are not there, stop and say the Linear connector needs connecting. "tracker: <op>" in the skills and the watch means:`,
+    `  whoami: get_user "me" saved to <file>, then node "${tracker}" whoami < <file>. Anything but ok: true, stop.`,
+    `  issue <id> > <file>: get_issue <id>, every page of list_comments (orderBy createdAt), and list_issues with parentId <id>, saved as {"issue": ..., "comments": [...], "children": <count>} to <raw>; then node "${tracker}" issue <id> < <raw> > <file>.`,
+    `  state <id> <status>: save_issue id, state "${s.backlog}" (backlog), "${s.notStarted}" (not-started), "${s.inProgress}" (in-progress), or "${s.inReview}" (in-review). Never ${s.done} or Canceled.`,
+    '  comment <id> <file>: save_comment issueId, body. --edit-last: save_comment with the id of your own latest comment, never a Spec an approver approved (policy approved: true).',
+    '  label <id> --add a --remove b: save_issue id, addLabels, removeLabels. assign <id> --add login --remove login: save_issue id, assignee (one per issue; null removes). title <id> <text>: save_issue id, title.',
+    `  create --title t --body-file f --label l: save_issue team "${t.team}", title, description, labels. sub <parent> <child>: save_issue id <child>, parentId <parent>.`,
+    `  search <words>: list_issues query, team "${t.team}". labels: list_issue_labels team "${t.team}", name "${cfg.areaLabelPrefix}".`,
+    `  inflight, queue: every page of list_issues assignee "me", team "${t.team}", saved as one list to <file>; node "${tracker}" inflight < <file> (or queue).`,
+    `  inbox: every page of get_notifications unreadOnly true, saved as one list to <file>; node "${tracker}" inbox < <file>. For each with an issue: tracker: issue, then node "${policy}" owner < <file>; mine: false, leave it unread. read <thread>: mark_notification id, read true.`,
+  ];
+}
+
 /** The watch text for a repo's config: how to claim, what a tick does, and the limit. */
 export function watchText(cfg) {
   if (!cfg.watch) return [];
   const watch = script('watch.mjs');
-  const tracker = script('tracker.mjs');
   const policy = script('policy.mjs');
   const agent = cfg.agent ? `@${cfg.agent.login}` : 'the agent account';
   const blockers = [...cfg.problems];
@@ -124,27 +153,27 @@ export function watchText(cfg) {
   }
   return [
     '',
-    `Watch: this repo runs the GitHub watch for area "${cfg.area}" in ${cfg.tracker.repo}. Before anything else in an interactive session, run`,
+    `Watch: this repo runs the ${cfg.tracker.kind === 'linear' ? 'Linear' : 'GitHub'} watch for area "${cfg.area}" in ${cfg.tracker.kind === 'linear' ? `team ${cfg.tracker.team}` : cfg.tracker.repo}. Before anything else in an interactive session, run`,
     `  node "${watch}" claim`,
     `On "claimed", run \`/loop ${cfg.watchInterval}\` with no prompt: it schedules the autonomous tick (the loop dies with the session`,
     'and expires after seven days). On "claimed (already held by this session)", which is what a re-fire after a compaction',
     'or /clear sees, the loop is already running: start no second one. On "held by <session> since <time>", another session',
     'is watching this repo: start no loop and say who holds it.',
-    `Ownership: act only on what \`node "${tracker}" inbox\` marks mine: true. mine: false, or a check that cannot run, means`,
+    'Ownership: act only on what `tracker: inbox` marks mine: true. mine: false, or a check that cannot run, means',
     "do nothing on that issue and leave its notification unread: every area's watch reads the same inbox. Mark a notification",
-    `read only with \`node "${tracker}" read <thread>\`, which refuses another area's. Setting an area label on an issue with`,
+    "read only with `tracker: read <thread>`, and never another area's. Setting an area label on an issue with",
     `none changes its owner: run \`node "${policy}" owner < <issue file>\` again, and on mine: false stop there.`,
     `Every tick: run \`node "${watch}" heartbeat\` first, then read the inbox, then in this order:`,
     '1. A reply from an approver\'s own account on an issue /ship stopped for their call (its latest agent comment starts',
     '   "Stopped for your call"): resume /ship at its fix step, whatever the words, never at the QA pass ("fix" or a go: fix',
     '   what the stop named, then a narrow check of that fix alone; "ship": push with the finding listed; "redesign": back to the plan).',
     "2. A \"go\" from an approver's own account after a build plan that waits for it: resume /build on that issue.",
-    `3. Otherwise, an "approved" or "go" from an approver's own account on a specced issue: \`node "${tracker}" issue <n>\` to a file,`,
+    '3. Otherwise, an "approved" or "go" from an approver\'s own account on a specced issue: `tracker: issue <n> > <file>`,',
     `   \`node "${policy}" check < <file>\`, and on approved: true, /build it (its own gates decide).`,
-    `None of 1 to 3 starts or restarts while \`node "${tracker}" inflight\` says full: true (limit ${cfg.inFlightLimit}, counting only issues`,
+    `None of 1 to 3 starts or restarts while \`tracker: inflight\` says full: true (limit ${cfg.inFlightLimit}, counting only issues`,
     `area "${cfg.area}" owns): leave its notification unread for a later tick, and name the count and every issue it counted.`,
     '4. Answers on a specced issue: fold them into the Spec. A mention or an assignment: read it and act per the rules.',
-    `5. Then, from \`node "${tracker}" queue\`: the next agent-fully-autonomous issue an approver approved (policy approved: true;`,
+    '5. Then, from `tracker: queue`: the next agent-fully-autonomous issue an approver approved (policy approved: true;',
     `   a label or status alone never counts): /build it, under the same limit. Then the oldest Backlog issue with no autonomy`,
     '   label: /spec it. Both go through the intake checks first.',
     '6. Rename any issue this area owns updated in the last 30 minutes whose title contains "epic" (Ticket intake, rule 1).',
@@ -162,14 +191,13 @@ export function renderRepo(root, cfg, { install = installHooks } = {}) {
     judge = `Push judge: NOT installed (${e.message}). verify.mjs will record no green until it is; tell an approver.`;
   }
   const policy = script('policy.mjs');
-  const tracker = script('tracker.mjs');
   const approvers = cfg.approvers.length ? cfg.approvers.map((a) => `@${a.login}`).join(', ') : 'none configured';
   const body = [
-    `Repo: ${root}. Integration: ${cfg.integration}, default branch ${cfg.defaultBranch}. Issues: ${cfg.tracker.repo || 'not configured'}, status by ${cfg.tracker.states}.`,
+    `Repo: ${root}. Integration: ${cfg.integration}, default branch ${cfg.defaultBranch}.`,
     `Approvers: ${approvers}. Agent account: ${cfg.agent ? `@${cfg.agent.login}` : 'none configured'}. Commits name ${cfg.issuePrefix || '(invalid issuePrefix)'}-<issue number>. In-flight limit: ${cfg.inFlightLimit} per area.`,
     `Protected paths for this repo: ${cfg.protectedPaths.length ? cfg.protectedPaths.join(', ') : 'none declared'} (${CONFIG_FILE} always).`,
-    `GitHub helper: node "${tracker}" whoami | issue <n> | state <n> <status> | inflight | queue | inbox | read <thread> | sub <parent> <child>.`,
-    `Intake and approval checks: node "${tracker}" issue <n> > <file>, then node "${policy}" check < <file>.`,
+    ...trackerText(cfg),
+    `Intake and approval checks: tracker: issue <n> > <file>, then node "${policy}" check < <file>.`,
     `Scripts: verify "${script('verify.mjs')}", approve "${script('approve.mjs')}", watch "${script('watch.mjs')}".`,
     ...(cfg.problems.length ? [`Config problems (approval fails closed until they are fixed): ${cfg.problems.join('; ')}.`] : []),
     ...(cfg.adhdStyle ? ['Issue and PR text uses the ADHD style: the answer or action first, numbered steps, lists of five or fewer, short lines, no preamble or recap.'] : []),
