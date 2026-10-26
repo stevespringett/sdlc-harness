@@ -146,7 +146,11 @@ npm test
 
 The tests (`node --test`, no dependencies) cover the push judge, the install, the deny-list, the policy (intake, approval, ownership, in-flight), the tracker helper and its GitHub adapter against a fake `gh`, the Linear adapter and hook guard against saved Linear MCP output, the watch lock, the session-start output size, and that every version field agrees.
 
-**Release.** The version is written only in `package.json`, `plugin.json`, and `marketplace.json`, never in Markdown. One command keeps them in sync, from a clean default branch with notes under `## Unreleased`:
+**Release.** The version is written only in `package.json`, `plugin.json`, and `marketplace.json`, never in Markdown, and `scripts/release.mjs` keeps them in sync. First, put the release notes under `## Unreleased` in `CHANGELOG.md` and push them.
+
+From GitHub: Actions, then **release**, then **Run workflow** on the default branch, with the version in `x.y.z` form. It runs the tests, sets every version field, dates the `## Unreleased` section, commits, tags `v<x.y.z>`, pushes both, and publishes the GitHub Release with that section as its notes. If the default branch is protected, allow GitHub Actions to push to it.
+
+Or from a clean checkout of the default branch:
 
 ```bash
 node scripts/release.mjs <x.y.z> --dry-run
@@ -156,7 +160,7 @@ node scripts/release.mjs <x.y.z> --dry-run
 node scripts/release.mjs <x.y.z>
 ```
 
-It sets every version field, dates the `## Unreleased` section, commits, and tags `v<x.y.z>`. It never pushes. Push the branch and the tag, and the release workflow checks the versions, runs the tests, and publishes the GitHub Release with that section as its notes:
+It does the same up to the tag, and never pushes. Push the branch and the tag, and the release workflow checks the versions, runs the tests, and publishes the GitHub Release:
 
 ```bash
 git push origin main v<x.y.z>

@@ -1,14 +1,32 @@
-# Publishes a GitHub Release when scripts/release.mjs's tag (v<x.y.z>) is
-# pushed: checks every version field matches the tag, runs the testCommand,
-# and uses the newest dated CHANGELOG.md section as the notes.
+# Releases the harness, two ways:
+#   - Actions > release > Run workflow, with a version: runs the testCommand,
+#     then scripts/release.mjs (every version field, the dated changelog
+#     section, the commit, and the tag v<x.y.z>), pushes both, and publishes
+#     the GitHub Release.
+#   - A v<x.y.z> tag pushed from a checkout (after running the script there):
+#     checks every version field matches the tag, runs the testCommand, and
+#     publishes the GitHub Release.
+# Both publish in this workflow because a tag pushed with the workflow's own
+# token starts no other workflow. The notes are the newest dated section of
+# CHANGELOG.md.
 name: release
 
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, x.y.z (higher than the current one; CHANGELOG.md needs notes under ## Unreleased)'
+        required: true
+        type: string
   push:
     tags: ['v*.*.*']
 
 permissions:
   contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -16,19 +34,38 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Release only from the default branch
+        if: github.event_name == 'workflow_dispatch' && github.ref_name != github.event.repository.default_branch
+        run: |
+          echo "Run this workflow from ${{ github.event.repository.default_branch }}, not ${GITHUB_REF_NAME}."
+          exit 1
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
+          fetch-depth: 0
+          persist-credentials: ${{ github.event_name == 'workflow_dispatch' }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-      - name: Check every version field matches the tag
-        run: node scripts/release.mjs --check "$GITHUB_REF_NAME"
       - name: Run the repo's testCommand
         run: node -e "process.stdout.write(require('./.sdlc-harness/sdlc.json').testCommand)" > "$RUNNER_TEMP/test.sh" && sh "$RUNNER_TEMP/test.sh"
+      - name: Cut the release (version fields, changelog, commit, tag)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          node scripts/release.mjs "$VERSION"
+          git push origin "HEAD:${GITHUB_REF_NAME}" "v${VERSION}"
+          echo "TAG=v${VERSION}" >> "$GITHUB_ENV"
+      - name: Check every version field matches the tag
+        if: github.event_name == 'push'
+        run: |
+          node scripts/release.mjs --check "$GITHUB_REF_NAME"
+          echo "TAG=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           node scripts/release.mjs --notes > "$RUNNER_TEMP/notes.md"
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag

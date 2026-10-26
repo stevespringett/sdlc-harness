@@ -4,6 +4,7 @@
 
 - Licensed under Apache-2.0: a `LICENSE` file, and the license field in `plugin.json` and `package.json`. The README and the decisions index speak to a team adopting the harness, not a client, and drop the setup time estimate.
 - `scripts/release.mjs` cuts a release: it writes the version into `package.json`, `plugin.json`, and both `marketplace.json` fields, dates this section, commits, and tags. A test fails when the fields disagree or a Markdown file names a version; changelog sections are dated, and the tag names the version. Pushing the tag runs `.github/workflows/release.yml`, which checks the versions, runs the tests, and publishes the GitHub Release.
+- The release workflow also runs from the Actions tab (Run workflow, with a version): it cuts the release with `scripts/release.mjs`, pushes the commit and tag, and publishes the GitHub Release.
 - `.github/workflows/test.yml` runs the repo's `testCommand` on Ubuntu and macOS, Node 20, 22, and 24.
 - The marketplace owner is the maintainer, Steve Springett.
 - Issue trackers sit behind one adapter (decision 0010). `tracker.kind` picks it (`github`, the default and only kind today). The skills write through the tracker helper (`comment`, `label`, `assign`, `title`, `create`, `search`, `labels`) instead of `gh issue`, and the helper checks the account before every write, edits only the agent's latest comment and never an approved Spec, and files issues only inside `tracker.allowedOwners`. Teams adopting the harness number their own decisions from 1000.
