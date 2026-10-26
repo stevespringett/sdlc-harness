@@ -1,6 +1,6 @@
 # 0001: GitHub Issues-first, trunk-based SDLC with labeled autonomy
 
-**Status:** Accepted; approval and acceptance detailed by [0003](0003-approvers-approve-and-accept.md), enforcement placed by [0005](0005-git-judges-the-push.md), how a repo is built narrowed by [0006](0006-build-principles-are-company-wide.md)
+**Status:** Accepted; approval and acceptance detailed by [0003](0003-approvers-approve-and-accept.md), enforcement placed by [0005](0005-git-judges-the-push.md), how a repo is built narrowed by [0006](0006-build-principles-are-company-wide.md), the ADR trigger restated in size by [0009](0009-estimates-are-t-shirt-sizes.md)
 **Date:** 2026-10-20
 
 ## Context

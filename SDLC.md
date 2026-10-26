@@ -40,7 +40,7 @@ flowchart LR
     X -.-> C
 ```
 
-### Stage 1: Capture (~5 min)
+### Stage 1: Capture
 
 A GitHub issue in the tracker repo with five headings, plain prose:
 
@@ -56,19 +56,19 @@ Label by kind (Feature, Improvement, Defect) and by area (`area:<name>`, one per
 
 **Intake checks (decision 0002).** Before the agent specs or builds an issue, `hooks/policy.mjs` checks it: the Intent shape, and no spec in the body unless an approver applied `human-architected`. A refused issue gets one comment saying why, ever, and goes back to its human creator.
 
-### Stage 2: Spec (~10 min)
+### Stage 2: Spec
 
 `/spec GH-n` reads the issue and the repo and posts a `## Spec` comment through the agent's own account, so the description stays the author's intent:
 
 ```
 Acceptance criteria   3 to 7 checkboxes, each testable
 Touches               the repo it lands in, then files or subsystems, protected paths flagged
-Size                  S (hours) / M (a day) / L (days)
+Size                  S / M / L, by scope and risk, never in units of time
 Autonomy              agent-fully-autonomous, agent-needs-go, or human-only (also applied as a label)
 Decisions needed      at most 3 questions, each with a recommended answer
 ```
 
-An approver approves the Spec with a comment from their own account whose line is just `approved` or `go`. That comment is the only license to build. A Spec edited after the approval drops it; a revision after approval is a new comment.
+An approver approves the Spec with a comment from their own account whose line is just `approved` or `go`. That comment is the only license to build. Size is scope and risk, never time (decision 0009): S is one file or function with an obvious approach, M is several files in one subsystem, L is more than one subsystem, a migration, a new pattern, or a real unknown. No estimate anywhere is stated in hours, days, weeks, or sprints. A Spec edited after the approval drops it; a revision after approval is a new comment.
 
 ### Stage 3: Build (agent, autonomous)
 
@@ -158,4 +158,4 @@ Claude Code keeps each hook command's output whole only up to 10,000 characters;
 
 ## 7. ADRs
 
-Kept, narrowed. Trigger: the decision constrains more than one future feature and costs more than a day to reverse. Cap 400 words. Proposed on the issue first, written in the same commit as the code. Repo decisions live in that repo; company-wide ones in [decisions/](decisions/).
+Kept, narrowed. Trigger: the decision constrains more than one future feature and would take size L work to reverse. Cap 400 words. Proposed on the issue first, written in the same commit as the code. Repo decisions live in that repo; company-wide ones in [decisions/](decisions/).

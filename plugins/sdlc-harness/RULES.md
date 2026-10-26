@@ -29,6 +29,16 @@ Status is kept in labels by default (`tracker.states: "labels"`) or in a Project
 
 Not Started (`status:not-started`) is a status a person may set. It is never an approval.
 
+## Sizing
+
+Every estimate is a t-shirt size, judged by scope and risk (decision 0009):
+
+- **S**: one file or one function, the approach is obvious, no open question.
+- **M**: several files in one subsystem, the approach is known.
+- **L**: more than one subsystem, a schema or data migration, a new pattern, or a real unknown.
+
+Never state an estimate, or how long work will take, in minutes, hours, days, weeks, sprints, or any other unit of time: not in a Spec, a plan, a comment, a commit, or a reply to a person. When asked "how long", answer with the size and what drives it.
+
 ## Autonomy
 
 Every open issue carries exactly one of three labels. `/spec` decides which and applies it; the label is the word used in specs, plans, and comments (never a tier number).
@@ -121,4 +131,4 @@ The session and every sub-agent use the model the config names in `subagentModel
 
 ## Decisions and ADRs
 
-Write an ADR only when a decision constrains more than one future feature and costs more than a day to reverse. Cap 400 words. Propose it as a "Decisions needed" item on the issue first; write it in the same commit as the code. Repo decisions live in that repo's `docs/adr/`; company-wide ones in the handbook's `decisions/`.
+Write an ADR only when a decision constrains more than one future feature and would take size L work to reverse. Cap 400 words. Propose it as a "Decisions needed" item on the issue first; write it in the same commit as the code. Repo decisions live in that repo's `docs/adr/`; company-wide ones in the handbook's `decisions/`.

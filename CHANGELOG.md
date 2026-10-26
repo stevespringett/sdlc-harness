@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Estimates are t-shirt sizes (S, M, L) judged by scope and risk, never stated in units of time (decision 0009). The Spec's size line drops "hours / a day / days", `RULES.md` gains a Sizing section, and the ADR trigger reads "would take size L work to reverse". The setup steps, stage headings, and skill steps drop their "~N min" and "~N s" timings.
+
 ## 0.1.0 (2026-10-20)
 
 - First release, derived from a private engineering handbook and made generic: GitHub Issues as the tracker, approvers and the agent account from the config, work areas in place of a fixed list, the in-flight limit counted per area (default 5, decision 0007), and session-start text split under Claude Code's hook-output cap (decision 0008).

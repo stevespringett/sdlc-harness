@@ -13,7 +13,7 @@ How a team works with Claude Code, in a form Claude Code can execute: a plugin w
 
 Setting up a new client takes about 30 minutes, in six steps.
 
-## 1. Accounts (~10 min)
+## 1. Accounts
 
 The harness tells people apart by GitHub account, so set these up first.
 
@@ -31,7 +31,7 @@ The harness tells people apart by GitHub account, so set these up first.
    gh api users/octocat --jq .id
    ```
 
-## 2. Install the plugin (~2 min)
+## 2. Install the plugin
 
 Host this repo where the client's machines can read it (a private repo in the client's GitHub org is usual), then add it as a marketplace and install the plugin:
 
@@ -60,7 +60,7 @@ Update with `claude plugin update sdlc-harness@sdlc-harness` after the handbook 
 
 Claude Code on the web: if a cloud session does not show the rules blocks, commit a copy of `RULES.md` as `.claude/rules/sdlc-rules.md` and of `PRINCIPLES.md` as `.claude/rules/sdlc-principles.md` in that repo as a fallback, and refresh both when the handbook changes. The push judge still installs only where the plugin's hooks run.
 
-## 3. Add the config file to each repo (~5 min)
+## 3. Add the config file to each repo
 
 Copy [schema/sdlc.example.json](schema/sdlc.example.json) to `.sdlc-harness/sdlc.json` in the repo root, fill it in, and commit it. The plugin does nothing in a repo without this file.
 
@@ -86,7 +86,7 @@ A single-repo client sets `area` and `defaultArea` to the same name and leaves `
 
 The first Claude Code session in the repo installs git's pre-push judge (decision 0005). From then on, a push needs a green record from `verify.mjs` for the exact tree it sends.
 
-## 4. Create the labels (~2 min)
+## 4. Create the labels
 
 From inside a repo that has the config, with `gh` logged in as someone who can manage labels in the tracker repo:
 

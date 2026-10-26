@@ -12,8 +12,8 @@ Stage 1 of the SDLC. Captures intent in GitHub Issues. Never plans, never builds
 
 ## Steps
 
-1. **Check the account** (~5 s). `node <tracker> whoami`. Anything but `ok: true` → stop and say what it reported: the agent writes only through its own GitHub account, never an approver's.
-2. **Check for a duplicate** (~10 s). `gh issue list --repo <repo> --state all --search "<two or three distinctive words>" --json number,title,state --limit 10`. If an open issue already covers it, say so with its number and stop.
+1. **Check the account**. `node <tracker> whoami`. Anything but `ok: true` → stop and say what it reported: the agent writes only through its own GitHub account, never an approver's.
+2. **Check for a duplicate**. `gh issue list --repo <repo> --state all --search "<two or three distinctive words>" --json number,title,state --limit 10`. If an open issue already covers it, say so with its number and stop.
 3. **Write the description** to a file, in this exact shape, plain prose, no filler:
 
    ```
