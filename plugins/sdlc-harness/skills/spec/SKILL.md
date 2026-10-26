@@ -1,14 +1,16 @@
 ---
 name: spec
-description: Turn a GitHub issue's intent into an approvable spec. Reads the issue and the repo, posts a Spec comment from the agent's own account (acceptance criteria, touches, size, autonomy label, decisions needed), applies the label, asks at most three questions as one comment. Never writes code and never closes or moves the issue.
-argument-hint: "GH-n (or the issue number)"
+description: sdlc-harness only, in a repo with .sdlc-harness/sdlc.json. Turn an issue's intent into an approvable spec, on GitHub Issues or Linear as that config names. Reads the issue and the repo, posts a Spec comment from the agent's own account (acceptance criteria, touches, size, autonomy label, decisions needed), applies the label, asks at most three questions as one comment. Never writes code and never closes or moves the issue.
+argument-hint: "<prefix>-n, such as GH-12 or ENG-12 (or the issue number)"
 ---
 
-# /spec GH-n
+# /spec <prefix>-n
 
-Stage 2 of the SDLC. Output is a `## Spec` comment on the issue, written by the agent's own GitHub account so the spec is attributed to the agent and the description stays the author's intent, and, if needed, one comment with questions. An approver approves by replying `approved` (or `go`) on the issue from their own account; this skill never changes status and never treats a status or a label as approval.
+Stage 2 of the SDLC. Output is a `## Spec` comment on the issue, written by the agent's own tracker account so the spec is attributed to the agent and the description stays the author's intent, and, if needed, one comment with questions. An approver approves by replying `approved` (or `go`) on the issue from their own account; this skill never changes status and never treats a status or a label as approval.
 
 `<policy>` is the path the repo block at session start prints. `tracker: <op>` is an operation on the issue tracker: the repo block at session start says how this repo's tracker does each one (a `tracker.mjs` command for GitHub, a Linear MCP call for Linear).
+
+**First, check this is the sdlc-harness's repo.** If the repo root has no `.sdlc-harness/sdlc.json`, stop and say this skill is for repos the sdlc-harness plugin manages; if the repo has another SDLC plugin's config instead (such as `.arpezia/sdlc.json`), that plugin's skill of the same name is the one to use.
 
 ## Steps
 

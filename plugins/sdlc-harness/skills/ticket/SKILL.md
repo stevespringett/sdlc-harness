@@ -1,14 +1,16 @@
 ---
 name: ticket
-description: File a GitHub issue in the Intent shape (Problem, Outcome, Constraints, Not in scope, Open questions) in the tracker repo. Use for any new piece of work, and mid-build only for something outside the issue that blocks it, where it adds the Discovered label and links the issue you are on.
-argument-hint: "<what you noticed or want> [--from GH-n]"
+description: sdlc-harness only, in a repo with .sdlc-harness/sdlc.json. File an issue in the Intent shape (Problem, Outcome, Constraints, Not in scope, Open questions) in the tracker that config names, GitHub Issues or Linear. Use for any new piece of work, and mid-build only for something outside the issue that blocks it, where it adds the Discovered label and links the issue you are on.
+argument-hint: "<what you noticed or want> [--from <prefix>-n]"
 ---
 
 # /ticket
 
-Stage 1 of the SDLC. Captures intent in GitHub Issues. Never plans, never builds.
+Stage 1 of the SDLC. Captures intent in the issue tracker. Never plans, never builds.
 
 `tracker: <op>` is an operation on the issue tracker: the repo block at session start says how this repo's tracker does each one (a `tracker.mjs` command for GitHub, a Linear MCP call for Linear). `<prefix>` is the issue prefix (default `GH`).
+
+**First, check this is the sdlc-harness's repo.** If the repo root has no `.sdlc-harness/sdlc.json`, stop and say this skill is for repos the sdlc-harness plugin manages; if the repo has another SDLC plugin's config instead (such as `.arpezia/sdlc.json`), that plugin's skill of the same name is the one to use.
 
 ## Steps
 

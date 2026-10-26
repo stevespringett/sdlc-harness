@@ -1,19 +1,21 @@
 ---
 name: ship
-description: Ship a built issue. Runs the repo's tests through the verifier, gets one QA review from a separate session, fixes what it found in one round, has the fixes checked, then integrates per .sdlc-harness/sdlc.json (trunk push or PR), triggers on-demand e2e when the diff warrants it, moves the issue to In Review, and posts the closing comment. Never closes the issue.
-argument-hint: "GH-n"
+description: sdlc-harness only, in a repo with .sdlc-harness/sdlc.json. Ship an issue /build built, on GitHub Issues or Linear as that config names. Runs the repo's tests through the verifier, gets one QA review from a separate session, fixes what it found in one round, has the fixes checked, then integrates per .sdlc-harness/sdlc.json (trunk push or PR), triggers on-demand e2e when the diff warrants it, moves the issue to In Review, and posts the closing comment. Never closes the issue.
+argument-hint: "<prefix>-n"
 ---
 
-# /ship GH-n
+# /ship <prefix>-n
 
 Stage 4 of the SDLC. Precondition: the issue's worktree exists and every acceptance criterion is either met or deferred with an approver's OK on the issue.
 
 `<verify>` is the path the repo block at session start prints; `tracker: <op>` is an operation on the issue tracker: the repo block at session start says how this repo's tracker does each one (a `tracker.mjs` command for GitHub, a Linear MCP call for Linear). `<prefix>` is the issue prefix. Run every git and verify step in the checkout the issue was built in (`/build` step 4), with that checkout's config.
 
+**First, check this is the sdlc-harness's repo.** If the repo root has no `.sdlc-harness/sdlc.json`, stop and say this skill is for repos the sdlc-harness plugin manages; if the repo has another SDLC plugin's config instead (such as `.arpezia/sdlc.json`), that plugin's skill of the same name is the one to use.
+
 ## Steps
 
 1. **Check the account** (`tracker: whoami`, `ok: true` or stop) and read `.sdlc-harness/sdlc.json`.
-2. **Clean tree.** `git status --porcelain`. Uncommitted changes → commit them or stop. Every commit names `<prefix>-<n>`; none carries `Closes`, `Fixes`, `Resolves`, or another closing keyword before an issue reference (reword any that does), so GitHub never closes the issue on its own.
+2. **Clean tree.** `git status --porcelain`. Uncommitted changes → commit them or stop. Every commit names `<prefix>-<n>`; none carries `Closes`, `Fixes`, `Resolves`, or another closing keyword before an issue reference (reword any that does), so the tracker never closes the issue on its own.
 3. **Rebase** onto the latest default branch: `git fetch origin && git rebase origin/<defaultBranch>`. Conflicts are yours to resolve; re-run the tests after.
 4. **Verify** (the real gate): `node <verify> --quiet`. Red → fix, commit, verify again. Never weaken a test. Green writes the record git's pre-push judge checks; verify also installs the judge and records nothing until git is proven to run it.
 5. **One QA pass by a separate session** (`RULES.md`, Quality before In Review). `Agent` with `subagent_type: general-purpose`, `model:` the config's `subagentModel`, and this brief: the issue number, the Spec's acceptance criteria and Touches, "review `git diff origin/<defaultBranch>...HEAD` in <worktree path>; do not edit files; check it against the principles file (the `file` path the session's `<sdlc-harness-principles>` block names), as narrowed by the exceptions the repo's `CLAUDE.md` names; the full suite already ran through verify, so run single test files only; <mutation line>; return a verdict (push / fix first) and findings, each marked Important (it makes an acceptance criterion false, unless an approver agreed on the issue to defer it; shows or writes one user's data for another; opens a security hole; loses or corrupts data; crashes or hangs the app; or, in tooling and rules, lets a check pass that should fail or makes two rules contradict) or Minor, with file:line and a concrete failure scenario; put anything outside the issue's scope (its Spec, what its Touches list, and the files its commits change) under one 'found, not fixed' line; skip style". The mutation line is "run mutation testing on the changed code" when the diff is in a risky area, and "do not run mutation testing" otherwise.

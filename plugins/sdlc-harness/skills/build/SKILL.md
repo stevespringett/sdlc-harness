@@ -1,14 +1,16 @@
 ---
 name: build
-description: Build a GitHub issue an approver approved (their own "approved" or "go" comment after the Spec) in a local worktree, plan comment first, label-aware, failing test first for defects, within the area's in-flight limit, then hand off to /ship. The only skill that writes code.
-argument-hint: "GH-n [--no-ship]"
+description: sdlc-harness only, in a repo with .sdlc-harness/sdlc.json. Build an issue (GitHub Issues or Linear, as that config names) an approver approved (their own "approved" or "go" comment after the Spec) in a local worktree, plan comment first, label-aware, failing test first for defects, within the area's in-flight limit, then hand off to /ship. The only skill that writes code.
+argument-hint: "<prefix>-n [--no-ship]"
 ---
 
-# /build GH-n
+# /build <prefix>-n
 
 Stage 3 of the SDLC. Precondition: an approver approved the issue with a comment from their own account after the latest Spec (the policy helper's `approved: true`). Resuming an In Progress issue re-checks the same thing; no status or label is approval by itself. Ends by invoking `/ship` unless `--no-ship` is given.
 
 `<policy>` and `<approve>` are the paths the repo block at session start prints; `tracker: <op>` is an operation on the issue tracker: the repo block at session start says how this repo's tracker does each one (a `tracker.mjs` command for GitHub, a Linear MCP call for Linear). `<prefix>` is the issue prefix and `<agent>` the agent's login.
+
+**First, check this is the sdlc-harness's repo.** If the repo root has no `.sdlc-harness/sdlc.json`, stop and say this skill is for repos the sdlc-harness plugin manages; if the repo has another SDLC plugin's config instead (such as `.arpezia/sdlc.json`), that plugin's skill of the same name is the one to use.
 
 ## Steps
 

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Skills route by repo when another SDLC plugin is installed beside this one: each skill's description says it is for repos with `.sdlc-harness/sdlc.json`, each starts by checking that file is there (and points to the other plugin's skill when the repo has that plugin's config instead), and the session-start text names the four skills by their full names (`sdlc-harness:build`).
 - Licensed under Apache-2.0: a `LICENSE` file, and the license field in `plugin.json` and `package.json`. The README and the decisions index speak to a team adopting the harness, not a client, and drop the setup time estimate.
 - `scripts/release.mjs` cuts a release: it writes the version into `package.json`, `plugin.json`, and both `marketplace.json` fields, dates this section, commits, and tags. A test fails when the fields disagree or a Markdown file names a version; changelog sections are dated, and the tag names the version. Pushing the tag runs `.github/workflows/release.yml`, which checks the versions, runs the tests, and publishes the GitHub Release.
 - The release workflow also runs from the Actions tab (Run workflow, with a version): it cuts the release with `scripts/release.mjs`, pushes the commit and tag, and publishes the GitHub Release.

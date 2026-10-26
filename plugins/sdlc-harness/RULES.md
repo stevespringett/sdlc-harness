@@ -1,6 +1,6 @@
 # SDLC rules
 
-Injected into every session by the `sdlc-harness` plugin in any repo that has `.sdlc-harness/sdlc.json`, in parts, with the build principles (`PRINCIPLES.md`) and the repo's own facts as separate blocks. This is the executable subset; the explanation and diagrams are in the handbook's `SDLC.md`. Skills: `/ticket`, `/spec`, `/build`, `/ship`. The repo block at session start names the approvers, the agent account, the tracker repo, the issue prefix, the area, and the helpers' paths.
+Injected into every session by the `sdlc-harness` plugin in any repo that has `.sdlc-harness/sdlc.json`, in parts, with the build principles (`PRINCIPLES.md`) and the repo's own facts as separate blocks. This is the executable subset; the explanation and diagrams are in the handbook's `SDLC.md`. Skills: this plugin's `sdlc-harness:ticket`, `sdlc-harness:spec`, `sdlc-harness:build`, and `sdlc-harness:ship`; another plugin's skill of the same name is not for this repo. The repo block at session start names the approvers, the agent account, the tracker repo, the issue prefix, the area, and the helpers' paths.
 
 ## Sources of truth
 

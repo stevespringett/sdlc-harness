@@ -196,6 +196,7 @@ export function renderRepo(root, cfg, { install = installHooks } = {}) {
     `Repo: ${root}. Integration: ${cfg.integration}, default branch ${cfg.defaultBranch}.`,
     `Approvers: ${approvers}. Agent account: ${cfg.agent ? `@${cfg.agent.login}` : 'none configured'}. Commits name ${cfg.issuePrefix || '(invalid issuePrefix)'}-<issue number>. In-flight limit: ${cfg.inFlightLimit} per area.`,
     `Protected paths for this repo: ${cfg.protectedPaths.length ? cfg.protectedPaths.join(', ') : 'none declared'} (${CONFIG_FILE} always).`,
+    'Skills for this repo: sdlc-harness:ticket, sdlc-harness:spec, sdlc-harness:build, sdlc-harness:ship. Another plugin\'s skill with the same short name is not for this repo: when a person types /build (or /ticket, /spec, /ship) here, run the sdlc-harness one.',
     ...trackerText(cfg),
     `Intake and approval checks: tracker: issue <n> > <file>, then node "${policy}" check < <file>.`,
     `Scripts: verify "${script('verify.mjs')}", approve "${script('approve.mjs')}", watch "${script('watch.mjs')}".`,
