@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { installHooks, proveHooks, globalHooksDir, localHooksDir, prePushShim, CHAINED_HOOKS } from '../lib.mjs';
+import { osEnv } from './os-env.mjs';
 
 const LIB = fileURLToPath(new URL('../lib.mjs', import.meta.url));
 const BASE = mkdtempSync(join(tmpdir(), 'sdlc-install-'));
@@ -17,6 +18,7 @@ after(() => rmSync(BASE, { recursive: true, force: true }));
 function world() {
   const root = mkdtempSync(join(BASE, 'w-'));
   const env = {
+    ...osEnv(),
     PATH: process.env.PATH,
     HOME: join(root, 'home'),
     XDG_CONFIG_HOME: join(root, 'xdg-config'),

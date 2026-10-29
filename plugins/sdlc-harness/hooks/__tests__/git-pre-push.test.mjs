@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { closingKeyword, gitCommandIn, greenKey, gitEnv, windowsArgv } from '../git-pre-push.mjs';
+import { osEnv } from './os-env.mjs';
 
 const JUDGE = fileURLToPath(new URL('../git-pre-push.mjs', import.meta.url));
 const BASE = mkdtempSync(join(tmpdir(), 'sdlc-judge-'));
@@ -18,6 +19,7 @@ after(() => rmSync(BASE, { recursive: true, force: true }));
 
 function envFor(root) {
   const env = {
+    ...osEnv(),
     PATH: process.env.PATH,
     HOME: join(root, 'home'),
     XDG_CONFIG_HOME: join(root, 'xdg-config'),

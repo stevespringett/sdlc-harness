@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { greenKey, proveHooks } from '../lib.mjs';
+import { osEnv } from './os-env.mjs';
 
 const VERIFY = fileURLToPath(new URL('../verify.mjs', import.meta.url));
 const BASE = mkdtempSync(join(tmpdir(), 'sdlc-verify-'));
@@ -18,6 +19,7 @@ after(() => rmSync(BASE, { recursive: true, force: true }));
 function repo(testCommand = 'true') {
   const root = mkdtempSync(join(BASE, 'r-'));
   const env = {
+    ...osEnv(),
     PATH: process.env.PATH,
     HOME: join(root, 'home'),
     XDG_CONFIG_HOME: join(root, 'xdg-config'),

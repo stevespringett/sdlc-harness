@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { OUTPUT_LIMIT, RULE_PARTS, RULES_PATH, renderRules, rulesParts, sections, watchText } from '../session-start.mjs';
 import { normalizeConfig } from '../lib.mjs';
+import { osEnv } from './os-env.mjs';
 
 const PLUGIN = fileURLToPath(new URL('../..', import.meta.url));
 const RULES = readFileSync(join(PLUGIN, 'RULES.md'), 'utf8');
@@ -42,6 +43,7 @@ const HEAVY = {
 function world(cfg = HEAVY) {
   const root = mkdtempSync(join(BASE, `${'deep-path-'.repeat(6)}w-`));
   const env = {
+    ...osEnv(),
     PATH: process.env.PATH,
     HOME: join(root, 'home'),
     XDG_CONFIG_HOME: join(root, 'xdg-config'),
