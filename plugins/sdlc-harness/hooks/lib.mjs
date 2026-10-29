@@ -390,9 +390,10 @@ export function installHooks(root, { env = process.env, node = process.execPath 
  * Proof that git will run the plugin's judge on a push from this repo: the
  * hooks path git uses is one of the harness's directories, its judge is the
  * plugin's byte for byte, and its pre-push shim runs that judge with a node
- * that exists. Returns { ok, reason }.
+ * that exists. Returns { ok, reason }. On Windows a file has no execute bit:
+ * Node never reports one, and Git for Windows runs a hook by its #! line.
  */
-export function proveHooks(root, { env = process.env } = {}) {
+export function proveHooks(root, { env = process.env, platform = process.platform } = {}) {
   const eff = gitRun(['config', '--get', 'core.hooksPath'], root, env);
   if (!eff.ok || !eff.out) return { ok: false, reason: 'core.hooksPath is not set, so git runs no push judge here' };
   const raw = expandHome(eff.out, env);
@@ -409,7 +410,7 @@ export function proveHooks(root, { env = process.env } = {}) {
   if (sha256(readFileSync(judge)) !== sha256(readFileSync(JUDGE_SOURCE))) return { ok: false, reason: `${judge} differs from the plugin's judge` };
   const shim = join(dir, 'pre-push');
   if (!existsSync(shim)) return { ok: false, reason: `${shim} is missing` };
-  if (!(statSync(shim).mode & 0o111)) return { ok: false, reason: `${shim} is not executable` };
+  if (platform !== 'win32' && !(statSync(shim).mode & 0o111)) return { ok: false, reason: `${shim} is not executable` };
   const body = readFileSync(shim, 'utf8');
   if (body !== prePushShim(dir, nodeIn(body), { local: same(dir, localDir) })) return { ok: false, reason: `${shim} does not run ${judge}` };
   if (!existsSync(nodeIn(body))) return { ok: false, reason: `the node ${shim} runs is gone` };

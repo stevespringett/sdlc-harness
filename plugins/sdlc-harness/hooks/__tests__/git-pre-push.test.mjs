@@ -10,7 +10,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { closingKeyword, greenKey, gitEnv } from '../git-pre-push.mjs';
+import { closingKeyword, gitCommandIn, greenKey, gitEnv, windowsArgv } from '../git-pre-push.mjs';
 
 const JUDGE = fileURLToPath(new URL('../git-pre-push.mjs', import.meta.url));
 const BASE = mkdtempSync(join(tmpdir(), 'sdlc-judge-'));
@@ -328,6 +328,40 @@ describe('history is never rewritten or removed', () => {
     commitFile(t, 'a.txt', 'a\n');
     green(t);
     accepted(push(t, 'origin', 'HEAD:gh-1'));
+  });
+});
+
+describe('reading the push command on Windows (no /proc, no ps)', () => {
+  test('a command line splits the way a Windows program splits it', () => {
+    const cases = [
+      [String.raw`"C:\Program Files\Git\mingw64\bin\git.exe" push --mirror origin`, [String.raw`C:\Program Files\Git\mingw64\bin\git.exe`, 'push', '--mirror', 'origin']],
+      ['git  -c "user.name=A B"\tpush', ['git', '-c', 'user.name=A B', 'push']],
+      ['git -c x="a b"c push', ['git', '-c', 'x=a bc', 'push']],
+      ['git "" push', ['git', '', 'push']],
+      ['git "say ""hi""" push', ['git', 'say "hi"', 'push']],
+      [String.raw`git a\\b push`, ['git', String.raw`a\\b`, 'push']],
+      [String.raw`git a\\"b c" push`, ['git', String.raw`a\b c`, 'push']],
+      [String.raw`git a\"b push`, ['git', 'a"b', 'push']],
+      [String.raw`git a\\\"b push`, ['git', String.raw`a\"b`, 'push']],
+      ['  ', []],
+    ];
+    for (const [line, want] of cases) assert.deepEqual(windowsArgv(line), want, line);
+  });
+
+  test("the nearest git among the hook's ancestors is the one read", () => {
+    const chain = [
+      { Name: 'sh.exe', CommandLine: 'sh.exe .git/sdlc-harness/hooks/pre-push origin' },
+      { Name: 'GIT.EXE', CommandLine: 'git.exe push --mirror origin' },
+      { Name: 'git.exe', CommandLine: 'git.exe push origin' },
+    ];
+    assert.deepEqual(gitCommandIn(chain), ['git.exe', 'push', '--mirror', 'origin']);
+  });
+
+  test('no git, or a git whose command line cannot be read, gives nothing to judge by', () => {
+    assert.equal(gitCommandIn([{ Name: 'sh.exe', CommandLine: 'sh.exe pre-push' }]), null);
+    assert.equal(gitCommandIn([{ Name: 'git.exe', CommandLine: null }]), null);
+    assert.equal(gitCommandIn([]), null);
+    assert.equal(gitCommandIn(null), null);
   });
 });
 

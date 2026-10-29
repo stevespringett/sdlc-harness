@@ -284,6 +284,20 @@ describe('proof', () => {
     installHooks(w.repo, { env: w.env, node: join(w.root, 'no-node') });
     assert.match(proveHooks(w.repo, { env: w.env }).reason, /node .* is gone/);
   });
+
+  test('fails when the shim is not executable', () => {
+    const w = world();
+    const { localDir } = installHooks(w.repo, { env: w.env });
+    chmodSync(join(localDir, 'pre-push'), 0o644);
+    assert.match(proveHooks(w.repo, { env: w.env, platform: 'linux' }).reason, /is not executable/);
+  });
+
+  test('on Windows, where a file has no execute bit, the shim needs none', () => {
+    const w = world();
+    const { localDir } = installHooks(w.repo, { env: w.env });
+    chmodSync(join(localDir, 'pre-push'), 0o644);
+    assert.deepEqual(proveHooks(w.repo, { env: w.env, platform: 'win32' }), { ok: true, dir: localDir });
+  });
 });
 
 describe('a missing node', () => {

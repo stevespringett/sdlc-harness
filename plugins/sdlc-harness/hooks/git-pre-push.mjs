@@ -435,13 +435,7 @@ function judgeLine(cwd, remoteUrl, line, state) {
 function mirroring(cwd, remoteName) {
   const cfg = spawnSync('git', ['config', '--bool', '--get', `remote.${remoteName}.mirror`], { cwd, encoding: 'utf8' });
   if (cfg.status === 0 && cfg.stdout.trim() === 'true') return true;
-  let args = null;
-  try {
-    args = readFileSync(`/proc/${process.ppid}/cmdline`, 'utf8').split('\0');
-  } catch {
-    const ps = spawnSync('ps', ['-o', 'args=', '-p', String(process.ppid)], { encoding: 'utf8' });
-    if (ps.status === 0) args = ps.stdout.trim().split(/\s+/);
-  }
+  const args = pushArgs();
   if (!args) throw new Refusal('The judge could not read the command that runs this push, so it cannot tell a mirror push.');
   // The git that runs this hook was started as `git [options] <command> ...`;
   // a command that is an alias is read as its expansion.
@@ -455,6 +449,90 @@ function mirroring(cwd, remoteName) {
     if (alias.status === 0 && !alias.stdout.trim().startsWith('!')) words = [...alias.stdout.trim().split(/\s+/), ...words.slice(1)];
   }
   return words.includes('--mirror');
+}
+
+/**
+ * The arguments of the git that runs this hook, or null when they cannot be
+ * read. Linux has /proc and other Unix systems have ps. Windows has neither,
+ * and the sh of Git for Windows does not replace itself on exec, so there the
+ * judge asks Windows for its ancestors and takes the nearest git.
+ */
+function pushArgs() {
+  if (process.platform === 'win32') {
+    const script = [
+      `$p = ${process.ppid}; $c = @()`,
+      'for ($n = 0; $n -lt 8 -and $p; $n++) {',
+      '  $q = Get-CimInstance Win32_Process -Filter "ProcessId=$p"',
+      '  if (-not $q) { break }',
+      '  $c += [pscustomobject]@{ Name = $q.Name; CommandLine = $q.CommandLine }',
+      "  if ($q.Name -ieq 'git.exe') { break }",
+      '  $p = $q.ParentProcessId',
+      '}',
+      'ConvertTo-Json -Compress -InputObject $c',
+    ].join('\n');
+    const ps = spawnSync(join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8', timeout: 30_000, windowsHide: true });
+    if (ps.status !== 0) return null;
+    try {
+      return gitCommandIn(JSON.parse(ps.stdout));
+    } catch {
+      return null;
+    }
+  }
+  try {
+    return readFileSync(`/proc/${process.ppid}/cmdline`, 'utf8').split('\0');
+  } catch {
+    const ps = spawnSync('ps', ['-o', 'args=', '-p', String(process.ppid)], { encoding: 'utf8' });
+    return ps.status === 0 ? ps.stdout.trim().split(/\s+/) : null;
+  }
+}
+
+/**
+ * The arguments of the nearest git in a chain of Windows processes, the
+ * hook's parent first ({ Name, CommandLine } each), or null when there is no
+ * git or its command line cannot be read.
+ */
+export function gitCommandIn(chain) {
+  const git = Array.isArray(chain) && chain.find((p) => p && /^git\.exe$/i.test(p.Name));
+  return git && typeof git.CommandLine === 'string' ? windowsArgv(git.CommandLine) : null;
+}
+
+/**
+ * A Windows command line split into arguments the way a C program's startup
+ * code splits it: space or tab ends an argument outside quotes, "" inside
+ * quotes is one quote, and backslashes are literal except before a quote,
+ * where each pair is one backslash and an odd one out escapes the quote.
+ */
+export function windowsArgv(line) {
+  const args = [];
+  let arg = null;
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (!quoted && (c === ' ' || c === '\t')) {
+      if (arg !== null) args.push(arg);
+      arg = null;
+      continue;
+    }
+    arg ??= '';
+    if (c === '\\') {
+      let n = 1;
+      while (line[i + n] === '\\') n++;
+      if (line[i + n] === '"') {
+        arg += '\\'.repeat(n >> 1) + (n % 2 ? '"' : '');
+        i += n % 2 ? n : n - 1;
+      } else {
+        arg += '\\'.repeat(n);
+        i += n - 1;
+      }
+    } else if (c === '"') {
+      if (quoted && line[i + 1] === '"') {
+        arg += '"';
+        i++;
+      } else quoted = !quoted;
+    } else arg += c;
+  }
+  if (arg !== null) args.push(arg);
+  return args;
 }
 
 /** Where the hook this judge stands in front of lives. */
