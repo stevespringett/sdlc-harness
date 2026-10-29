@@ -22,6 +22,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         node: [20, 22, 24]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - name: Keep line endings as committed
         run: git config --global core.autocrlf false
@@ -31,6 +32,34 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
+      # Diagnostic, Windows only: how long the judge's PowerShell lookup takes,
+      # with the runner's environment and with the stripped one the tests give
+      # git, then a few judged pushes alone with their timings.
+      - name: Probe the judge's Windows process lookup
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/probe.cjs" <<'EOF'
+          const { spawnSync } = require('node:child_process');
+          const { join } = require('node:path');
+          const ps = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+          const script = `Get-CimInstance Win32_Process -Filter "ProcessId=${process.pid}" | Select-Object -ExpandProperty Name`;
+          const stripped = { PATH: process.env.PATH, HOME: join(process.env.RUNNER_TEMP, 'home'), GIT_CONFIG_NOSYSTEM: '1' };
+          for (const [label, env] of [['runner env', process.env], ['test env', stripped]]) {
+            for (let n = 1; n <= 3; n++) {
+              const t = Date.now();
+              const r = spawnSync(ps, ['-NoProfile', '-NonInteractive', '-Command', script], { env, encoding: 'utf8', timeout: 60_000, windowsHide: true });
+              console.log(`${label} #${n}: ${Date.now() - t} ms, status ${r.status}, signal ${r.signal}, error ${r.error?.message}, out ${JSON.stringify(r.stdout?.trim())}, err ${JSON.stringify(r.stderr?.trim().slice(0, 300))}`);
+            }
+          }
+          EOF
+          node "$RUNNER_TEMP/probe.cjs"
+      - name: Time a few judged pushes
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        timeout-minutes: 8
+        shell: bash
+        run: node --test --test-reporter=spec --test-timeout=180000 --test-name-pattern="mirror|goes through when clean" plugins/sdlc-harness/hooks/__tests__/git-pre-push.test.mjs
       - name: Run the repo's testCommand
         shell: bash
         run: node -e "process.stdout.write(require('./.sdlc-harness/sdlc.json').testCommand)" > "$RUNNER_TEMP/test.sh" && sh "$RUNNER_TEMP/test.sh"
