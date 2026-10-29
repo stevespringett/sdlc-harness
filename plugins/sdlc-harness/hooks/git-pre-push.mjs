@@ -455,11 +455,14 @@ function mirroring(cwd, remoteName) {
  * The arguments of the git that runs this hook, or null when they cannot be
  * read. Linux has /proc and other Unix systems have ps. Windows has neither,
  * and the sh of Git for Windows does not replace itself on exec, so there the
- * judge asks Windows for its ancestors and takes the nearest git.
+ * judge asks Windows for its ancestors and takes the nearest git. PowerShell
+ * loads the module by name: finding a command without it scans every module,
+ * which takes some 20 seconds when LOCALAPPDATA is not set to hold the cache.
  */
 function pushArgs() {
   if (process.platform === 'win32') {
     const script = [
+      'Import-Module CimCmdlets',
       `$p = ${process.ppid}; $c = @()`,
       'for ($n = 0; $n -lt 8 -and $p; $n++) {',
       '  $q = Get-CimInstance Win32_Process -Filter "ProcessId=$p"',
