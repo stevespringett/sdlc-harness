@@ -318,13 +318,15 @@ export function prePushShim(dir, node = process.execPath, { local = false } = {}
 // circle. A shim records the hook's name with git's pid (its parent, which an
 // exec'd link keeps) and its own pid (the parent of a link that spawns the
 // next one instead), and ends the chain when either comes back. A git a hook
-// starts has a new pid, so its own hooks still run. A chain that spawns
+// starts has a new pid, so its own hooks still run. On Windows the sh a native
+// git starts sees $PPID as 1 for every git, so there it keeps only its own pid. A chain that spawns
 // through a middleman stops at eight links. The Claude Code hook refuses a
 // command that sets the variable itself.
 const CHAIN_GUARD = (name) => [
-  `case " $SDLC_HARNESS_CHAINED " in *" ${name}:$PPID "*|*" ${name}:$$ "*) exit 0 ;; esac`,
+  'g=$PPID; [ "$g" = 1 ] && g=$$',
+  `case " $SDLC_HARNESS_CHAINED " in *" ${name}:$g "*|*" ${name}:$$ "*) exit 0 ;; esac`,
   `[ "$(printf '%s\\n' $SDLC_HARNESS_CHAINED | grep -c '^${name}:')" -ge 16 ] && exit 0`,
-  `SDLC_HARNESS_CHAINED="$SDLC_HARNESS_CHAINED ${name}:$PPID ${name}:$$"; export SDLC_HARNESS_CHAINED`,
+  `SDLC_HARNESS_CHAINED="$SDLC_HARNESS_CHAINED ${name}:$g ${name}:$$"; export SDLC_HARNESS_CHAINED`,
 ];
 
 function chainShim(dir, name) {

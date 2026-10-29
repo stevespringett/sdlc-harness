@@ -575,7 +575,10 @@ function main() {
     if (process.env.SDLC_HARNESS_PUSH_CHAINED === '1') process.exit(0);
     const hook = chainedHook(cwd, common);
     if (hook) {
-      const r = spawnSync(hook, process.argv.slice(2), { cwd, input, stdio: ['pipe', 'inherit', 'inherit'], env: { ...process.env, SDLC_HARNESS_PUSH_CHAINED: '1' } });
+      // Windows runs no #! script itself; Git for Windows runs a hook with its
+      // sh, which is on PATH while a hook runs.
+      const [cmd, args] = process.platform === 'win32' && !/\.exe$/i.test(hook) ? ['sh', [hook, ...process.argv.slice(2)]] : [hook, process.argv.slice(2)];
+      const r = spawnSync(cmd, args, { cwd, input, stdio: ['pipe', 'inherit', 'inherit'], env: { ...process.env, SDLC_HARNESS_PUSH_CHAINED: '1' } });
       if (r.error) refuse([`The repo's own pre-push hook could not run: ${r.error.message}`]);
       process.exit(r.status ?? 1);
     }

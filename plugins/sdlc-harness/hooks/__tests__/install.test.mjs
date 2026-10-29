@@ -6,8 +6,8 @@ import assert from 'node:assert/strict';
 import { spawnSync, execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { delimiter, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { installHooks, proveHooks, globalHooksDir, localHooksDir, prePushShim, CHAINED_HOOKS } from '../lib.mjs';
 import { osEnv } from './os-env.mjs';
 
@@ -61,7 +61,7 @@ describe('install', () => {
     const { globalDir, localDir } = installHooks(w.repo, { env: w.env });
     assert.equal(globalDir, globalHooksDir(w.env));
     assert.equal(localDir, localHooksDir(w.repo, w.env));
-    assert.match(localDir, /\/sdlc-harness\/hooks$/);
+    assert.match(localDir, /[\\/]sdlc-harness[\\/]hooks$/);
     assert.equal(git(w, w.repo, 'config', '--local', 'core.hooksPath'), localDir);
     assert.equal(git(w, w.repo, 'config', '--global', 'core.hooksPath'), globalDir);
     for (const dir of [globalDir, localDir]) {
@@ -217,7 +217,7 @@ describe('install', () => {
 
   test('two installs at once leave a whole judge', async () => {
     const w = world();
-    const script = `import { installHooks } from ${JSON.stringify(LIB)}; installHooks(${JSON.stringify(w.repo)});`;
+    const script = `import { installHooks } from ${JSON.stringify(pathToFileURL(LIB).href)}; installHooks(${JSON.stringify(w.repo)});`;
     const runs = Array.from({ length: 4 }, () => new Promise((res) => spawn(process.execPath, ['--input-type=module', '-e', script], { env: w.env, stdio: 'ignore' }).on('exit', res)));
     const codes = await Promise.all(runs);
     assert.deepEqual(codes, [0, 0, 0, 0]);
@@ -303,8 +303,12 @@ describe('proof', () => {
 });
 
 describe('a missing node', () => {
-  // git is in /usr/bin and /bin; node is not, on this machine and in CI's.
-  const noNode = (w) => ({ ...w.env, PATH: '/usr/bin:/bin' });
+  // git is in /usr/bin and /bin; node is not, on this machine and in CI's. On
+  // Windows, the PATH entries that hold no node.exe, which keep Git's own.
+  const noNode = (w) => ({
+    ...w.env,
+    PATH: process.platform === 'win32' ? process.env.PATH.split(delimiter).filter((d) => d && !existsSync(join(d, 'node.exe'))).join(delimiter) : '/usr/bin:/bin',
+  });
 
   test('the shim runs the judge with the node on PATH when the one it names is gone', () => {
     const w = world();

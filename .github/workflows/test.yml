@@ -32,42 +32,6 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
-      # Diagnostic, Windows only: which environment variable the judge's
-      # PowerShell lookup waits on when it is missing, then a few judged pushes
-      # alone with their timings.
-      - name: Probe the judge's Windows process lookup
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          cat > "$RUNNER_TEMP/probe.cjs" <<'EOF'
-          const { spawnSync } = require('node:child_process');
-          const { join } = require('node:path');
-          const ps = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-          const query = `Get-CimInstance Win32_Process -Filter "ProcessId=${process.pid}" | Select-Object -ExpandProperty Name`;
-          const time = (env) => {
-            const t = Date.now();
-            const r = spawnSync(ps, ['-NoProfile', '-NonInteractive', '-Command', query], { env, encoding: 'utf8', timeout: 60_000, windowsHide: true });
-            return `${Date.now() - t} ms, status ${r.status}, out ${JSON.stringify(r.stdout?.trim())}`;
-          };
-          console.log(`runner env (warm-up): ${time(process.env)}`);
-          console.log(`runner env: ${time(process.env)}`);
-          // Each variable left out alone: the slow ones are what PowerShell waits without.
-          for (const k of Object.keys(process.env).sort()) {
-            const env = { ...process.env };
-            delete env[k];
-            const t = Date.now();
-            const line = time(env);
-            if (Date.now() - t > 3000) console.log(`without ${k}: ${line}`);
-          }
-          console.log('done');
-          EOF
-          node "$RUNNER_TEMP/probe.cjs"
-      - name: Time a few judged pushes
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        timeout-minutes: 8
-        shell: bash
-        run: node --test --test-reporter=spec --test-timeout=180000 --test-name-pattern="mirror|goes through when clean" plugins/sdlc-harness/hooks/__tests__/git-pre-push.test.mjs
       - name: Run the repo's testCommand
         shell: bash
         run: node -e "process.stdout.write(require('./.sdlc-harness/sdlc.json').testCommand)" > "$RUNNER_TEMP/test.sh" && sh "$RUNNER_TEMP/test.sh"

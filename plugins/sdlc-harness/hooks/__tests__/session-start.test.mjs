@@ -67,7 +67,7 @@ const commands = (source) =>
     .flatMap((g) => g.hooks.map((h) => h.command.replaceAll('${CLAUDE_PLUGIN_ROOT}', PLUGIN)));
 const outputs = (w, source = 'startup', plugin = PLUGIN) =>
   commands(source).map((cmd) => {
-    const r = spawnSync('/bin/sh', ['-c', cmd.replaceAll(PLUGIN, plugin)], { input: JSON.stringify({ cwd: w.repo, source }), env: w.env, encoding: 'utf8' });
+    const r = spawnSync('sh', ['-c', cmd.replaceAll(PLUGIN, plugin)], { input: JSON.stringify({ cwd: w.repo, source }), env: w.env, encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);
     return r.stdout;
   });
@@ -149,7 +149,7 @@ describe('together, the outputs carry everything', () => {
     assert.match(repo, /Protected paths for this repo: services\/area-0\/migrations\//);
     assert.match(repo, /Skills for this repo: sdlc-harness:ticket, sdlc-harness:spec, sdlc-harness:build, sdlc-harness:ship\./);
     assert.match(repo, /Intake and approval checks: tracker: issue <n> > <file>, then node ".+\/policy\.mjs" check/);
-    assert.match(repo, /Tracker: GitHub Issues in .+ means `node ".+\/tracker\.mjs" <op> \.\.\.`/);
+    assert.match(repo, /Tracker: GitHub Issues in .+ means `node ".+[\\/]tracker\.mjs" <op> \.\.\.`/);
     assert.match(repo, /Approvers: @octo-lead, @second-lead, @third-lead\. Agent account: @acme-delivery-bot\./);
     assert.match(repo, /Commits name GH-<issue number>/);
     assert.match(repo, /ADHD style/);
