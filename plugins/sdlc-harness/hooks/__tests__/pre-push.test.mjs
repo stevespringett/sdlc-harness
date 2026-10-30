@@ -320,7 +320,9 @@ describe('issues and pull requests stay inside the allowed owners', () => {
   });
 });
 
-describe('gh aliases already set', () => {
+// The stub is a #! script on a :-separated PATH; Windows runs neither, and the
+// alias reading this checks is the same on every platform.
+describe('gh aliases already set', { skip: process.platform === 'win32' && 'the gh stub is a shell script' }, () => {
   const dir = mkdtempSync(join(tmpdir(), 'sdlc-gh-alias-'));
   after(() => rmSync(dir, { recursive: true, force: true }));
   // A stub gh on PATH answers `gh alias list` the way gh does.

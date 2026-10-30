@@ -135,7 +135,7 @@ describe('together, the outputs carry everything', () => {
     const at = outs.findIndex((o) => o.includes(PRINCIPLES));
     assert.ok(at >= 0, 'the principles print');
     const out = outs[at];
-    assert.match(out, /<sdlc-harness-principles file="\/.+\/PRINCIPLES\.md">/);
+    assert.match(out, /<sdlc-harness-principles file="(?:\/|[A-Za-z]:\\).+[\\/]PRINCIPLES\.md">/);
     assert.match(out, /may narrow one with a named exception and its reason, never contradict it/);
     assert.match(out, /WCAG 2\.2 AA/);
     assert.match(out, /three real callers/);
@@ -148,7 +148,7 @@ describe('together, the outputs carry everything', () => {
     const repo = outputs(world()).find((o) => o.includes('<sdlc-harness-repo'));
     assert.match(repo, /Protected paths for this repo: services\/area-0\/migrations\//);
     assert.match(repo, /Skills for this repo: sdlc-harness:ticket, sdlc-harness:spec, sdlc-harness:build, sdlc-harness:ship\./);
-    assert.match(repo, /Intake and approval checks: tracker: issue <n> > <file>, then node ".+\/policy\.mjs" check/);
+    assert.match(repo, /Intake and approval checks: tracker: issue <n> > <file>, then node ".+[\\/]policy\.mjs" check/);
     assert.match(repo, /Tracker: GitHub Issues in .+ means `node ".+[\\/]tracker\.mjs" <op> \.\.\.`/);
     assert.match(repo, /Approvers: @octo-lead, @second-lead, @third-lead\. Agent account: @acme-delivery-bot\./);
     assert.match(repo, /Commits name GH-<issue number>/);

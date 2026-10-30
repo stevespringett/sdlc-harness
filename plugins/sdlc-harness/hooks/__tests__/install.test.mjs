@@ -218,9 +218,14 @@ describe('install', () => {
   test('two installs at once leave a whole judge', async () => {
     const w = world();
     const script = `import { installHooks } from ${JSON.stringify(pathToFileURL(LIB).href)}; installHooks(${JSON.stringify(w.repo)});`;
-    const runs = Array.from({ length: 4 }, () => new Promise((res) => spawn(process.execPath, ['--input-type=module', '-e', script], { env: w.env, stdio: 'ignore' }).on('exit', res)));
+    const errors = [];
+    const runs = Array.from({ length: 4 }, () => new Promise((res) => {
+      const p = spawn(process.execPath, ['--input-type=module', '-e', script], { env: w.env, stdio: ['ignore', 'ignore', 'pipe'] });
+      p.stderr.on('data', (d) => errors.push(String(d)));
+      p.on('exit', res);
+    }));
     const codes = await Promise.all(runs);
-    assert.deepEqual(codes, [0, 0, 0, 0]);
+    assert.deepEqual(codes, [0, 0, 0, 0], errors.join(''));
     assert.equal(proveHooks(w.repo, { env: w.env }).ok, true);
   });
 });

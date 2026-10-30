@@ -282,7 +282,17 @@ function writeAtomic(path, body, mode) {
   const tmp = `${path}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`;
   writeFileSync(tmp, body);
   if (mode) chmodSync(tmp, mode);
-  renameSync(tmp, path);
+  // Windows refuses a rename over a file another process has open, as a second
+  // install reading it at the same moment does; it is free again within moments.
+  for (let n = 0; ; n++) {
+    try {
+      renameSync(tmp, path);
+      return;
+    } catch (e) {
+      if (process.platform !== 'win32' || n >= 50 || !['EPERM', 'EACCES', 'EBUSY'].includes(e.code)) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+  }
 }
 
 export function prePushShim(dir, node = process.execPath, { local = false } = {}) {
