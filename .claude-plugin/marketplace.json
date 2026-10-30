@@ -5,14 +5,14 @@
   },
   "metadata": {
     "description": "A Claude Code SDLC harness: the skills and hooks that make every repo work the same way, with GitHub Issues as the tracker.",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "plugins": [
     {
       "name": "sdlc-harness",
       "source": "./plugins/sdlc-harness",
       "description": "GitHub Issues-first, trunk-based SDLC: /ticket, /spec, /build, /ship, plus git's pre-push judge that enforces green tests, no secrets, no closing keywords, and the agent-needs-go approval on protected paths for the exact commits each push sends.",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "keywords": [
         "sdlc",
         "github-issues",

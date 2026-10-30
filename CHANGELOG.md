@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026-10-30
 
 - Skills route by repo when another SDLC plugin is installed beside this one: each skill's description says it is for repos with `.sdlc-harness/sdlc.json`, each starts by checking that file is there (and points to the other plugin's skill when the repo has that plugin's config instead), and the session-start text names the four skills by their full names (`sdlc-harness:build`).
 - Licensed under Apache-2.0: a `LICENSE` file, and the license field in `plugin.json` and `package.json`. The README and the decisions index speak to a team adopting the harness, not a client, and drop the setup time estimate.
